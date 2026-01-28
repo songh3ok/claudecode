@@ -4,6 +4,7 @@ mod utils;
 
 use std::io;
 use std::path::PathBuf;
+use std::env;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -17,7 +18,46 @@ use ratatui::{
 
 use crate::ui::app::{App, Screen};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn print_help() {
+    println!("cokacdir {} - Norton Commander style dual-panel file manager", VERSION);
+    println!();
+    println!("USAGE:");
+    println!("    cokacdir [OPTIONS]");
+    println!();
+    println!("OPTIONS:");
+    println!("    -h, --help       Print help information");
+    println!("    -v, --version    Print version information");
+    println!();
+    println!("HOMEPAGE: https://cokacdir.cokac.com");
+}
+
+fn print_version() {
+    println!("cokacdir {}", VERSION);
+}
+
 fn main() -> io::Result<()> {
+    // Handle command line arguments
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "-h" | "--help" => {
+                print_help();
+                return Ok(());
+            }
+            "-v" | "--version" => {
+                print_version();
+                return Ok(());
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[1]);
+                eprintln!("Use --help for usage information");
+                return Ok(());
+            }
+        }
+    }
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();

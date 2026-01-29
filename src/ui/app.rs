@@ -1170,3 +1170,345 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Counter for unique temp directory names
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Helper to create a temporary directory for testing
+    fn create_temp_dir() -> PathBuf {
+        let unique_id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "cokacdir_app_test_{}_{}",
+            std::process::id(),
+            unique_id
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+        temp_dir
+    }
+
+    /// Helper to cleanup temp directory
+    fn cleanup_temp_dir(path: &Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    // ========== get_valid_path tests ==========
+
+    #[test]
+    fn test_get_valid_path_existing() {
+        let temp_dir = create_temp_dir();
+        let fallback = PathBuf::from("/tmp");
+
+        let result = get_valid_path(&temp_dir, &fallback);
+        assert_eq!(result, temp_dir);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_valid_path_nonexistent_uses_parent() {
+        let temp_dir = create_temp_dir();
+        let nonexistent = temp_dir.join("does_not_exist");
+        let fallback = PathBuf::from("/tmp");
+
+        let result = get_valid_path(&nonexistent, &fallback);
+        assert_eq!(result, temp_dir);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_valid_path_fallback() {
+        let nonexistent = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        let fallback = PathBuf::from("/tmp");
+
+        let result = get_valid_path(&nonexistent, &fallback);
+        // Should fall back to /tmp or /
+        assert!(result.exists());
+    }
+
+    #[test]
+    fn test_get_valid_path_root() {
+        let root = PathBuf::from("/");
+        let fallback = PathBuf::from("/tmp");
+
+        let result = get_valid_path(&root, &fallback);
+        assert_eq!(result, root);
+    }
+
+    // ========== PanelState tests ==========
+
+    #[test]
+    fn test_panel_state_initialization() {
+        let temp_dir = create_temp_dir();
+
+        // Create some test files
+        fs::write(temp_dir.join("file1.txt"), "content").unwrap();
+        fs::write(temp_dir.join("file2.txt"), "content").unwrap();
+        fs::create_dir(temp_dir.join("subdir")).unwrap();
+
+        let panel = PanelState::new(temp_dir.clone());
+
+        assert_eq!(panel.path, temp_dir);
+        assert!(!panel.files.is_empty());
+        assert_eq!(panel.selected_index, 0);
+        assert!(panel.selected_files.is_empty());
+        assert_eq!(panel.sort_by, SortBy::Name);
+        assert_eq!(panel.sort_order, SortOrder::Asc);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_panel_state_has_parent_entry() {
+        let temp_dir = create_temp_dir();
+        let subdir = temp_dir.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+
+        let panel = PanelState::new(subdir);
+
+        // Should have ".." entry
+        assert!(panel.files.iter().any(|f| f.name == ".."));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_panel_state_current_file() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("test.txt"), "content").unwrap();
+
+        let panel = PanelState::new(temp_dir.clone());
+
+        let current = panel.current_file();
+        assert!(current.is_some());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_panel_state_toggle_sort() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("a.txt"), "content").unwrap();
+        fs::write(temp_dir.join("b.txt"), "content").unwrap();
+
+        let mut panel = PanelState::new(temp_dir.clone());
+
+        // Default is Name Asc
+        assert_eq!(panel.sort_by, SortBy::Name);
+        assert_eq!(panel.sort_order, SortOrder::Asc);
+
+        // Toggle same sort field -> change order
+        panel.toggle_sort(SortBy::Name);
+        assert_eq!(panel.sort_by, SortBy::Name);
+        assert_eq!(panel.sort_order, SortOrder::Desc);
+
+        // Toggle different sort field -> change field, reset to Asc
+        panel.toggle_sort(SortBy::Size);
+        assert_eq!(panel.sort_by, SortBy::Size);
+        assert_eq!(panel.sort_order, SortOrder::Asc);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    // ========== App tests ==========
+
+    #[test]
+    fn test_app_initialization() {
+        let temp_dir = create_temp_dir();
+        let left_path = temp_dir.join("left");
+        let right_path = temp_dir.join("right");
+
+        fs::create_dir_all(&left_path).unwrap();
+        fs::create_dir_all(&right_path).unwrap();
+
+        let app = App::new(left_path.clone(), right_path.clone());
+
+        assert_eq!(app.left_panel.path, left_path);
+        assert_eq!(app.right_panel.path, right_path);
+        assert_eq!(app.active_panel, PanelSide::Left);
+        assert_eq!(app.current_screen, Screen::DualPanel);
+        assert!(app.dialog.is_none());
+        assert!(app.message.is_none());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_switch_panel() {
+        let temp_dir = create_temp_dir();
+        fs::create_dir_all(temp_dir.join("left")).unwrap();
+        fs::create_dir_all(temp_dir.join("right")).unwrap();
+
+        let mut app = App::new(temp_dir.join("left"), temp_dir.join("right"));
+
+        assert_eq!(app.active_panel, PanelSide::Left);
+
+        app.switch_panel();
+        assert_eq!(app.active_panel, PanelSide::Right);
+
+        app.switch_panel();
+        assert_eq!(app.active_panel, PanelSide::Left);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_cursor_movement() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("file1.txt"), "").unwrap();
+        fs::write(temp_dir.join("file2.txt"), "").unwrap();
+        fs::write(temp_dir.join("file3.txt"), "").unwrap();
+
+        let mut app = App::new(temp_dir.clone(), temp_dir.clone());
+
+        let initial_index = app.active_panel().selected_index;
+
+        app.move_cursor(1);
+        assert_eq!(app.active_panel().selected_index, initial_index + 1);
+
+        app.move_cursor(-1);
+        assert_eq!(app.active_panel().selected_index, initial_index);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_cursor_bounds() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("file.txt"), "").unwrap();
+
+        let mut app = App::new(temp_dir.clone(), temp_dir.clone());
+
+        // Move cursor way past the end
+        app.move_cursor(1000);
+        let len = app.active_panel().files.len();
+        assert!(app.active_panel().selected_index < len);
+
+        // Move cursor way before the start
+        app.move_cursor(-1000);
+        assert_eq!(app.active_panel().selected_index, 0);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_cursor_to_start_end() {
+        let temp_dir = create_temp_dir();
+        for i in 0..10 {
+            fs::write(temp_dir.join(format!("file{}.txt", i)), "").unwrap();
+        }
+
+        let mut app = App::new(temp_dir.clone(), temp_dir.clone());
+
+        app.cursor_to_end();
+        let len = app.active_panel().files.len();
+        assert_eq!(app.active_panel().selected_index, len - 1);
+
+        app.cursor_to_start();
+        assert_eq!(app.active_panel().selected_index, 0);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_show_message() {
+        let temp_dir = create_temp_dir();
+        let mut app = App::new(temp_dir.clone(), temp_dir.clone());
+
+        assert!(app.message.is_none());
+
+        app.show_message("Test message");
+        assert_eq!(app.message, Some("Test message".to_string()));
+        assert!(app.message_timer > 0);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_toggle_selection() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("file1.txt"), "").unwrap();
+        fs::write(temp_dir.join("file2.txt"), "").unwrap();
+
+        let mut app = App::new(temp_dir.clone(), temp_dir.clone());
+
+        // Move past ".." if present
+        if app.active_panel().files.first().map(|f| f.name.as_str()) == Some("..") {
+            app.move_cursor(1);
+        }
+
+        let file_name = app.active_panel().current_file().unwrap().name.clone();
+
+        app.toggle_selection();
+        assert!(app.active_panel().selected_files.contains(&file_name));
+
+        // Move back to same file
+        app.move_cursor(-1);
+        app.toggle_selection();
+        assert!(!app.active_panel().selected_files.contains(&file_name));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_app_get_operation_files() {
+        let temp_dir = create_temp_dir();
+        fs::write(temp_dir.join("file1.txt"), "").unwrap();
+        fs::write(temp_dir.join("file2.txt"), "").unwrap();
+
+        let mut app = App::new(temp_dir.clone(), temp_dir.clone());
+
+        // Move past ".."
+        if app.active_panel().files.first().map(|f| f.name.as_str()) == Some("..") {
+            app.move_cursor(1);
+        }
+
+        // No selection - returns current file
+        let files = app.get_operation_files();
+        assert_eq!(files.len(), 1);
+
+        // With selection - returns selected files
+        app.toggle_selection();
+        let files = app.get_operation_files();
+        assert_eq!(files.len(), 1);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    // ========== Enum tests ==========
+
+    #[test]
+    fn test_panel_side_equality() {
+        assert_eq!(PanelSide::Left, PanelSide::Left);
+        assert_eq!(PanelSide::Right, PanelSide::Right);
+        assert_ne!(PanelSide::Left, PanelSide::Right);
+    }
+
+    #[test]
+    fn test_sort_by_equality() {
+        assert_eq!(SortBy::Name, SortBy::Name);
+        assert_eq!(SortBy::Size, SortBy::Size);
+        assert_eq!(SortBy::Modified, SortBy::Modified);
+    }
+
+    #[test]
+    fn test_screen_equality() {
+        assert_eq!(Screen::DualPanel, Screen::DualPanel);
+        assert_eq!(Screen::FileViewer, Screen::FileViewer);
+        assert_ne!(Screen::DualPanel, Screen::Help);
+    }
+
+    #[test]
+    fn test_dialog_type_equality() {
+        assert_eq!(DialogType::Copy, DialogType::Copy);
+        assert_eq!(DialogType::Delete, DialogType::Delete);
+        assert_ne!(DialogType::Copy, DialogType::Move);
+    }
+}

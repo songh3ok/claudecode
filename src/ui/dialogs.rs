@@ -1137,3 +1137,294 @@ fn handle_copy_move_dialog_input(app: &mut App, code: KeyCode, _modifiers: KeyMo
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Counter for unique temp directory names
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Helper to create a temporary directory for testing
+    fn create_temp_test_dir() -> PathBuf {
+        let unique_id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "cokacdir_dialog_test_{}_{}",
+            std::process::id(),
+            unique_id
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+        temp_dir
+    }
+
+    /// Helper to cleanup temp directory
+    fn cleanup_temp_test_dir(path: &Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    // ========== expand_path_string tests ==========
+
+    #[test]
+    fn test_expand_tilde() {
+        let result = expand_path_string("~");
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(result, home);
+        }
+    }
+
+    #[test]
+    fn test_expand_tilde_subpath() {
+        let result = expand_path_string("~/Documents");
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(result, home.join("Documents"));
+        }
+    }
+
+    #[test]
+    fn test_expand_absolute_path() {
+        let result = expand_path_string("/usr/bin");
+        assert_eq!(result, PathBuf::from("/usr/bin"));
+    }
+
+    #[test]
+    fn test_expand_relative_path() {
+        let result = expand_path_string("relative/path");
+        assert_eq!(result, PathBuf::from("relative/path"));
+    }
+
+    // ========== parse_path_for_completion tests ==========
+
+    #[test]
+    fn test_parse_path_trailing_slash() {
+        let (base_dir, prefix) = parse_path_for_completion("/usr/");
+        assert_eq!(base_dir, PathBuf::from("/usr/"));
+        assert_eq!(prefix, "");
+    }
+
+    #[test]
+    fn test_parse_path_partial_name() {
+        let (base_dir, prefix) = parse_path_for_completion("/usr/bi");
+        assert_eq!(base_dir, PathBuf::from("/usr"));
+        assert_eq!(prefix, "bi");
+    }
+
+    #[test]
+    fn test_parse_path_root() {
+        let (base_dir, prefix) = parse_path_for_completion("/");
+        assert_eq!(base_dir, PathBuf::from("/"));
+        assert_eq!(prefix, "");
+    }
+
+    #[test]
+    fn test_parse_path_tilde() {
+        let (_base_dir, _prefix) = parse_path_for_completion("~/Doc");
+        if let Some(home) = dirs::home_dir() {
+            // Should expand tilde
+            assert!(_base_dir.starts_with(home));
+        }
+    }
+
+    // ========== get_path_suggestions tests ==========
+
+    #[test]
+    fn test_path_suggestions_filter_dots() {
+        let temp_dir = create_temp_test_dir();
+
+        // Create test files
+        fs::write(temp_dir.join("file1.txt"), "").unwrap();
+        fs::write(temp_dir.join("file2.txt"), "").unwrap();
+        fs::create_dir(temp_dir.join("subdir")).unwrap();
+
+        let suggestions = get_path_suggestions(&temp_dir, "");
+
+        // Should not contain . or ..
+        assert!(!suggestions.contains(&".".to_string()));
+        assert!(!suggestions.contains(&"..".to_string()));
+
+        // Should contain our test files
+        assert!(suggestions.iter().any(|s| s.starts_with("file")));
+        assert!(suggestions.iter().any(|s| s.starts_with("subdir")));
+
+        cleanup_temp_test_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_path_suggestions_prefix_filter() {
+        let temp_dir = create_temp_test_dir();
+
+        fs::write(temp_dir.join("apple.txt"), "").unwrap();
+        fs::write(temp_dir.join("apricot.txt"), "").unwrap();
+        fs::write(temp_dir.join("banana.txt"), "").unwrap();
+
+        let suggestions = get_path_suggestions(&temp_dir, "ap");
+
+        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions.iter().all(|s| s.to_lowercase().starts_with("ap")));
+
+        cleanup_temp_test_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_path_suggestions_case_insensitive() {
+        let temp_dir = create_temp_test_dir();
+
+        fs::write(temp_dir.join("Apple.txt"), "").unwrap();
+        fs::write(temp_dir.join("APRICOT.txt"), "").unwrap();
+
+        let suggestions = get_path_suggestions(&temp_dir, "ap");
+
+        // Should match regardless of case
+        assert_eq!(suggestions.len(), 2);
+
+        cleanup_temp_test_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_path_suggestions_directories_first() {
+        let temp_dir = create_temp_test_dir();
+
+        fs::write(temp_dir.join("afile.txt"), "").unwrap();
+        fs::create_dir(temp_dir.join("adir")).unwrap();
+
+        let suggestions = get_path_suggestions(&temp_dir, "a");
+
+        // Directory should come first
+        assert!(suggestions[0].ends_with('/'));
+        assert_eq!(suggestions[0], "adir/");
+
+        cleanup_temp_test_dir(&temp_dir);
+    }
+
+    // ========== find_common_prefix tests ==========
+
+    #[test]
+    fn test_common_prefix_single() {
+        let suggestions = vec!["apple".to_string()];
+        let common = find_common_prefix(&suggestions);
+        assert_eq!(common, "apple");
+    }
+
+    #[test]
+    fn test_common_prefix_multiple() {
+        let suggestions = vec![
+            "application".to_string(),
+            "apple".to_string(),
+            "apartment".to_string(),
+        ];
+        let common = find_common_prefix(&suggestions);
+        assert_eq!(common, "ap");
+    }
+
+    #[test]
+    fn test_common_prefix_same() {
+        let suggestions = vec![
+            "test".to_string(),
+            "test".to_string(),
+        ];
+        let common = find_common_prefix(&suggestions);
+        assert_eq!(common, "test");
+    }
+
+    #[test]
+    fn test_common_prefix_empty() {
+        let suggestions: Vec<String> = vec![];
+        let common = find_common_prefix(&suggestions);
+        assert_eq!(common, "");
+    }
+
+    #[test]
+    fn test_common_prefix_no_common() {
+        let suggestions = vec![
+            "apple".to_string(),
+            "banana".to_string(),
+        ];
+        let common = find_common_prefix(&suggestions);
+        assert_eq!(common, "");
+    }
+
+    #[test]
+    fn test_common_prefix_strips_trailing_slash() {
+        let suggestions = vec![
+            "dir/".to_string(),
+            "dir2/".to_string(),
+        ];
+        let common = find_common_prefix(&suggestions);
+        assert_eq!(common, "dir");
+    }
+
+    // ========== PathCompletion tests ==========
+
+    #[test]
+    fn test_path_completion_default() {
+        let completion = PathCompletion::default();
+        assert!(completion.suggestions.is_empty());
+        assert_eq!(completion.selected_index, 0);
+        assert!(!completion.visible);
+    }
+
+    // ========== Dialog tests ==========
+
+    #[test]
+    fn test_dialog_creation() {
+        let dialog = Dialog {
+            dialog_type: DialogType::Copy,
+            input: "/home/user/".to_string(),
+            message: "Copy files".to_string(),
+            completion: Some(PathCompletion::default()),
+            selected_button: 0,
+        };
+
+        assert_eq!(dialog.dialog_type, DialogType::Copy);
+        assert_eq!(dialog.input, "/home/user/");
+        assert!(dialog.completion.is_some());
+    }
+
+    // ========== update_path_suggestions tests ==========
+
+    #[test]
+    fn test_update_path_suggestions_existing_dir() {
+        let temp_dir = create_temp_test_dir();
+        fs::write(temp_dir.join("test.txt"), "").unwrap();
+
+        let mut dialog = Dialog {
+            dialog_type: DialogType::Goto,
+            input: format!("{}/", temp_dir.display()),
+            message: String::new(),
+            completion: Some(PathCompletion::default()),
+            selected_button: 0,
+        };
+
+        update_path_suggestions(&mut dialog);
+
+        let completion = dialog.completion.as_ref().unwrap();
+        assert!(completion.visible);
+        assert!(completion.suggestions.iter().any(|s| s.contains("test")));
+
+        cleanup_temp_test_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_update_path_suggestions_no_match() {
+        let temp_dir = create_temp_test_dir();
+        fs::write(temp_dir.join("apple.txt"), "").unwrap();
+
+        let mut dialog = Dialog {
+            dialog_type: DialogType::Goto,
+            input: format!("{}/xyz", temp_dir.display()),
+            message: String::new(),
+            completion: Some(PathCompletion::default()),
+            selected_button: 0,
+        };
+
+        update_path_suggestions(&mut dialog);
+
+        let completion = dialog.completion.as_ref().unwrap();
+        assert!(!completion.visible);
+        assert!(completion.suggestions.is_empty());
+
+        cleanup_temp_test_dir(&temp_dir);
+    }
+}

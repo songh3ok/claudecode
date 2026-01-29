@@ -258,3 +258,376 @@ pub fn is_valid_filename(name: &str) -> Result<(), &'static str> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Counter for unique temp directory names
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// Helper to create a temporary directory for testing
+    fn create_temp_dir() -> PathBuf {
+        let unique_id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "cokacdir_test_{}_{}",
+            std::process::id(),
+            unique_id
+        ));
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+        temp_dir
+    }
+
+    /// Helper to cleanup temp directory
+    fn cleanup_temp_dir(path: &Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    // ========== is_valid_filename tests ==========
+
+    #[test]
+    fn test_is_valid_filename_normal() {
+        assert!(is_valid_filename("test.txt").is_ok());
+        assert!(is_valid_filename("my_file").is_ok());
+        assert!(is_valid_filename("file-name.rs").is_ok());
+        assert!(is_valid_filename("FILE123").is_ok());
+        assert!(is_valid_filename(".hidden").is_ok());
+    }
+
+    #[test]
+    fn test_is_valid_filename_empty_rejected() {
+        assert!(is_valid_filename("").is_err());
+        assert!(is_valid_filename("   ").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_filename_path_separator_rejected() {
+        assert!(is_valid_filename("path/file").is_err());
+        assert!(is_valid_filename("path\\file").is_err());
+        assert!(is_valid_filename("/absolute").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_filename_null_byte_rejected() {
+        assert!(is_valid_filename("file\0name").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_filename_reserved_names_rejected() {
+        assert!(is_valid_filename(".").is_err());
+        assert!(is_valid_filename("..").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_filename_too_long_rejected() {
+        let long_name = "a".repeat(256);
+        assert!(is_valid_filename(&long_name).is_err());
+
+        let max_name = "a".repeat(255);
+        assert!(is_valid_filename(&max_name).is_ok());
+    }
+
+    #[test]
+    fn test_is_valid_filename_control_chars_rejected() {
+        assert!(is_valid_filename("file\nname").is_err());
+        assert!(is_valid_filename("file\tname").is_err());
+        assert!(is_valid_filename("file\rname").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_filename_whitespace_rejected() {
+        assert!(is_valid_filename(" leading").is_err());
+        assert!(is_valid_filename("trailing ").is_err());
+        assert!(is_valid_filename(" both ").is_err());
+    }
+
+    #[test]
+    fn test_is_valid_filename_leading_hyphen_rejected() {
+        assert!(is_valid_filename("-option").is_err());
+        assert!(is_valid_filename("--long-option").is_err());
+    }
+
+    // ========== copy_file tests ==========
+
+    #[test]
+    fn test_copy_file_basic() {
+        let temp_dir = create_temp_dir();
+        let src = temp_dir.join("source.txt");
+        let dest = temp_dir.join("dest.txt");
+
+        let mut file = File::create(&src).unwrap();
+        writeln!(file, "test content").unwrap();
+
+        let result = copy_file(&src, &dest);
+        assert!(result.is_ok());
+        assert!(dest.exists());
+
+        let content = fs::read_to_string(&dest).unwrap();
+        assert!(content.contains("test content"));
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_file_same_path_rejected() {
+        let temp_dir = create_temp_dir();
+        let file_path = temp_dir.join("same.txt");
+
+        File::create(&file_path).unwrap();
+
+        let result = copy_file(&file_path, &file_path);
+        assert!(result.is_err());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_file_dest_exists_rejected() {
+        let temp_dir = create_temp_dir();
+        let src = temp_dir.join("src.txt");
+        let dest = temp_dir.join("dest.txt");
+
+        File::create(&src).unwrap();
+        File::create(&dest).unwrap();
+
+        let result = copy_file(&src, &dest);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().kind() == std::io::ErrorKind::AlreadyExists);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_copy_dir_recursive() {
+        let temp_dir = create_temp_dir();
+        let src_dir = temp_dir.join("src_dir");
+        let dest_dir = temp_dir.join("dest_dir");
+
+        fs::create_dir_all(src_dir.join("subdir")).unwrap();
+        File::create(src_dir.join("file1.txt")).unwrap();
+        File::create(src_dir.join("subdir/file2.txt")).unwrap();
+
+        let result = copy_file(&src_dir, &dest_dir);
+        assert!(result.is_ok());
+        assert!(dest_dir.exists());
+        assert!(dest_dir.join("file1.txt").exists());
+        assert!(dest_dir.join("subdir/file2.txt").exists());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_loop_detection() {
+        let temp_dir = create_temp_dir();
+        let dir_a = temp_dir.join("dir_a");
+        let dir_b = temp_dir.join("dir_b");
+        let dest = temp_dir.join("dest");
+
+        fs::create_dir_all(&dir_a).unwrap();
+        fs::create_dir_all(&dir_b).unwrap();
+
+        // Create symlink from dir_a/link -> dir_b
+        std::os::unix::fs::symlink(&dir_b, dir_a.join("link_to_b")).unwrap();
+        // Create symlink from dir_b/link -> dir_a (circular)
+        std::os::unix::fs::symlink(&dir_a, dir_b.join("link_to_a")).unwrap();
+
+        // This should detect the circular symlink
+        let result = copy_file(&dir_a, &dest);
+        // The copy should succeed since we don't follow symlinks into loops
+        // (symlinks are copied as symlinks, not followed)
+        assert!(result.is_ok());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_sensitive_path_symlink_rejected() {
+        let temp_dir = create_temp_dir();
+        let src_dir = temp_dir.join("src_dir");
+        let dest_dir = temp_dir.join("dest_dir");
+
+        fs::create_dir_all(&src_dir).unwrap();
+
+        // Create symlink pointing to /etc (sensitive path)
+        std::os::unix::fs::symlink("/etc", src_dir.join("sensitive_link")).unwrap();
+
+        let result = copy_file(&src_dir, &dest_dir);
+        assert!(result.is_err());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    // ========== move_file tests ==========
+
+    #[test]
+    fn test_move_file_basic() {
+        let temp_dir = create_temp_dir();
+        let src = temp_dir.join("move_src.txt");
+        let dest = temp_dir.join("move_dest.txt");
+
+        let mut file = File::create(&src).unwrap();
+        writeln!(file, "move content").unwrap();
+        drop(file);
+
+        let result = move_file(&src, &dest);
+        assert!(result.is_ok());
+        assert!(!src.exists());
+        assert!(dest.exists());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_move_file_same_path_rejected() {
+        let temp_dir = create_temp_dir();
+        let file_path = temp_dir.join("same_move.txt");
+
+        File::create(&file_path).unwrap();
+
+        let result = move_file(&file_path, &file_path);
+        assert!(result.is_err());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    // ========== delete_file tests ==========
+
+    #[test]
+    fn test_delete_file_basic() {
+        let temp_dir = create_temp_dir();
+        let file_path = temp_dir.join("delete_me.txt");
+
+        File::create(&file_path).unwrap();
+        assert!(file_path.exists());
+
+        let result = delete_file(&file_path);
+        assert!(result.is_ok());
+        assert!(!file_path.exists());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_delete_directory() {
+        let temp_dir = create_temp_dir();
+        let dir_path = temp_dir.join("delete_dir");
+
+        fs::create_dir_all(dir_path.join("subdir")).unwrap();
+        File::create(dir_path.join("file.txt")).unwrap();
+
+        let result = delete_file(&dir_path);
+        assert!(result.is_ok());
+        assert!(!dir_path.exists());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_delete_protected_path_rejected() {
+        // Test that protected paths cannot be deleted
+        for protected in PROTECTED_PATHS {
+            let result = delete_file(Path::new(protected));
+            // Either permission denied or the path protection kicks in
+            assert!(result.is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_delete_symlink() {
+        let temp_dir = create_temp_dir();
+        let target = temp_dir.join("target.txt");
+        let link = temp_dir.join("link");
+
+        File::create(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        // Delete symlink should not delete target
+        let result = delete_file(&link);
+        assert!(result.is_ok());
+        assert!(!link.exists());
+        assert!(target.exists()); // Target should still exist
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    // ========== create_directory tests ==========
+
+    #[test]
+    fn test_create_directory_basic() {
+        let temp_dir = create_temp_dir();
+        let new_dir = temp_dir.join("new_dir");
+
+        let result = create_directory(&new_dir);
+        assert!(result.is_ok());
+        assert!(new_dir.is_dir());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_create_directory_nested() {
+        let temp_dir = create_temp_dir();
+        let nested_dir = temp_dir.join("a/b/c/d");
+
+        let result = create_directory(&nested_dir);
+        assert!(result.is_ok());
+        assert!(nested_dir.is_dir());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_create_directory_exists_rejected() {
+        let temp_dir = create_temp_dir();
+        let dir_path = temp_dir.join("existing_dir");
+
+        fs::create_dir(&dir_path).unwrap();
+
+        let result = create_directory(&dir_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().kind() == std::io::ErrorKind::AlreadyExists);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    // ========== rename_file tests ==========
+
+    #[test]
+    fn test_rename_file_basic() {
+        let temp_dir = create_temp_dir();
+        let old_path = temp_dir.join("old_name.txt");
+        let new_path = temp_dir.join("new_name.txt");
+
+        File::create(&old_path).unwrap();
+
+        let result = rename_file(&old_path, &new_path);
+        assert!(result.is_ok());
+        assert!(!old_path.exists());
+        assert!(new_path.exists());
+
+        cleanup_temp_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_rename_file_dest_exists_rejected() {
+        let temp_dir = create_temp_dir();
+        let old_path = temp_dir.join("old.txt");
+        let new_path = temp_dir.join("new.txt");
+
+        File::create(&old_path).unwrap();
+        File::create(&new_path).unwrap();
+
+        let result = rename_file(&old_path, &new_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().kind() == std::io::ErrorKind::AlreadyExists);
+
+        cleanup_temp_dir(&temp_dir);
+    }
+}

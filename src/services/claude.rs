@@ -184,3 +184,161 @@ pub fn is_claude_available() -> bool {
 pub fn is_ai_supported() -> bool {
     cfg!(unix)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== is_valid_session_id tests ==========
+
+    #[test]
+    fn test_session_id_valid() {
+        assert!(is_valid_session_id("abc123"));
+        assert!(is_valid_session_id("session-1"));
+        assert!(is_valid_session_id("session_2"));
+        assert!(is_valid_session_id("ABC-XYZ_123"));
+        assert!(is_valid_session_id("a")); // Single char
+    }
+
+    #[test]
+    fn test_session_id_empty_rejected() {
+        assert!(!is_valid_session_id(""));
+    }
+
+    #[test]
+    fn test_session_id_too_long_rejected() {
+        // 64 characters should be valid
+        let max_len = "a".repeat(64);
+        assert!(is_valid_session_id(&max_len));
+
+        // 65 characters should be rejected
+        let too_long = "a".repeat(65);
+        assert!(!is_valid_session_id(&too_long));
+    }
+
+    #[test]
+    fn test_session_id_special_chars_rejected() {
+        assert!(!is_valid_session_id("session;rm -rf"));
+        assert!(!is_valid_session_id("session'OR'1=1"));
+        assert!(!is_valid_session_id("session`cmd`"));
+        assert!(!is_valid_session_id("session$(cmd)"));
+        assert!(!is_valid_session_id("session\nline2"));
+        assert!(!is_valid_session_id("session\0null"));
+        assert!(!is_valid_session_id("path/traversal"));
+        assert!(!is_valid_session_id("session with space"));
+        assert!(!is_valid_session_id("session.dot"));
+        assert!(!is_valid_session_id("session@email"));
+    }
+
+    #[test]
+    fn test_session_id_unicode_rejected() {
+        assert!(!is_valid_session_id("세션아이디"));
+        assert!(!is_valid_session_id("session_日本語"));
+        assert!(!is_valid_session_id("émoji🎉"));
+    }
+
+    // ========== ClaudeResponse tests ==========
+
+    #[test]
+    fn test_claude_response_struct() {
+        let response = ClaudeResponse {
+            success: true,
+            response: Some("Hello".to_string()),
+            session_id: Some("abc123".to_string()),
+            error: None,
+        };
+
+        assert!(response.success);
+        assert_eq!(response.response, Some("Hello".to_string()));
+        assert_eq!(response.session_id, Some("abc123".to_string()));
+        assert!(response.error.is_none());
+    }
+
+    #[test]
+    fn test_claude_response_error() {
+        let response = ClaudeResponse {
+            success: false,
+            response: None,
+            session_id: None,
+            error: Some("Connection failed".to_string()),
+        };
+
+        assert!(!response.success);
+        assert!(response.response.is_none());
+        assert_eq!(response.error, Some("Connection failed".to_string()));
+    }
+
+    // ========== parse_claude_output tests ==========
+
+    #[test]
+    fn test_parse_claude_output_json_result() {
+        let output = r#"{"session_id": "test-123", "result": "Hello, world!"}"#;
+        let response = parse_claude_output(output);
+
+        assert!(response.success);
+        assert_eq!(response.response, Some("Hello, world!".to_string()));
+        assert_eq!(response.session_id, Some("test-123".to_string()));
+    }
+
+    #[test]
+    fn test_parse_claude_output_json_message() {
+        let output = r#"{"session_id": "sess-456", "message": "This is a message"}"#;
+        let response = parse_claude_output(output);
+
+        assert!(response.success);
+        assert_eq!(response.response, Some("This is a message".to_string()));
+    }
+
+    #[test]
+    fn test_parse_claude_output_plain_text() {
+        let output = "Just plain text response";
+        let response = parse_claude_output(output);
+
+        assert!(response.success);
+        assert_eq!(response.response, Some("Just plain text response".to_string()));
+    }
+
+    #[test]
+    fn test_parse_claude_output_multiline() {
+        let output = r#"{"session_id": "s1"}
+{"result": "Final result"}"#;
+        let response = parse_claude_output(output);
+
+        assert!(response.success);
+        assert_eq!(response.session_id, Some("s1".to_string()));
+        assert_eq!(response.response, Some("Final result".to_string()));
+    }
+
+    #[test]
+    fn test_parse_claude_output_empty() {
+        let output = "";
+        let response = parse_claude_output(output);
+
+        assert!(response.success);
+        // Empty output should return empty response
+        assert_eq!(response.response, Some("".to_string()));
+    }
+
+    // ========== is_ai_supported tests ==========
+
+    #[test]
+    fn test_is_ai_supported() {
+        #[cfg(unix)]
+        assert!(is_ai_supported());
+
+        #[cfg(not(unix))]
+        assert!(!is_ai_supported());
+    }
+
+    // ========== session_id_regex tests ==========
+
+    #[test]
+    fn test_session_id_regex_caching() {
+        // Multiple calls should return the same cached regex
+        let regex1 = session_id_regex();
+        let regex2 = session_id_regex();
+
+        // Both should point to the same static instance
+        assert!(std::ptr::eq(regex1, regex2));
+    }
+}

@@ -245,3 +245,166 @@ fn get_process_command(pid: i32) -> Option<String> {
         Some(command.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== is_valid_pid tests ==========
+
+    #[test]
+    fn test_is_valid_pid_positive() {
+        assert!(is_valid_pid(1));
+        assert!(is_valid_pid(100));
+        assert!(is_valid_pid(1000));
+        assert!(is_valid_pid(4194304)); // Max PID on Linux
+    }
+
+    #[test]
+    fn test_is_valid_pid_invalid() {
+        assert!(!is_valid_pid(0));
+        assert!(!is_valid_pid(-1));
+        assert!(!is_valid_pid(-100));
+        assert!(!is_valid_pid(4194305)); // Exceeds max PID
+    }
+
+    // ========== is_protected_pid tests ==========
+
+    #[test]
+    fn test_is_protected_pid_init() {
+        // PID 1 is init/systemd and should be protected
+        let result = is_protected_pid(1, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("system process"));
+    }
+
+    #[test]
+    fn test_is_protected_pid_kthreadd() {
+        // PID 2 is kthreadd and should be protected
+        let result = is_protected_pid(2, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("system process"));
+    }
+
+    #[test]
+    fn test_is_protected_pid_self() {
+        // Current process should be protected
+        let current_pid = std::process::id() as i32;
+        let result = is_protected_pid(current_pid, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("file manager itself"));
+    }
+
+    #[test]
+    fn test_is_protected_pid_low_pid() {
+        // Low PIDs (< 300) are likely kernel threads
+        let result = is_protected_pid(100, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("kernel thread"));
+    }
+
+    #[test]
+    fn test_is_protected_pid_normal() {
+        // Normal user process PIDs should be allowed
+        // Use a high PID that's unlikely to be the current process
+        let high_pid = 50000;
+        if high_pid != std::process::id() as i32 {
+            let result = is_protected_pid(high_pid, None);
+            assert!(result.is_ok());
+        }
+    }
+
+    // ========== kernel thread detection tests ==========
+
+    #[test]
+    fn test_kernel_thread_detection_bracket_format() {
+        // Kernel threads have names like [kworker/0:0]
+        let result = is_protected_pid(50000, Some("[kworker/0:0]"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("kernel threads"));
+    }
+
+    #[test]
+    fn test_kernel_thread_detection_normal_process() {
+        // Normal processes should pass
+        let result = is_protected_pid(50000, Some("/usr/bin/bash"));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_kernel_thread_detection_various_formats() {
+        // Various kernel thread names
+        assert!(is_protected_pid(50000, Some("[migration/0]")).is_err());
+        assert!(is_protected_pid(50000, Some("[ksoftirqd/0]")).is_err());
+        assert!(is_protected_pid(50000, Some("[rcu_sched]")).is_err());
+    }
+
+    // ========== parse_process_line tests ==========
+
+    #[test]
+    fn test_parse_process_line_valid() {
+        let line = "root         1  0.0  0.1  12345  6789 ?        Ss   Jan01   0:05 /sbin/init";
+        let result = parse_process_line(line);
+        assert!(result.is_some());
+
+        let info = result.unwrap();
+        assert_eq!(info.pid, 1);
+        assert_eq!(info.user, "root");
+        assert_eq!(info.cpu, 0.0);
+        assert_eq!(info.mem, 0.1);
+        assert_eq!(info.command, "/sbin/init");
+    }
+
+    #[test]
+    fn test_parse_process_line_invalid_short() {
+        let line = "root 1 0.0"; // Too few fields
+        let result = parse_process_line(line);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_process_line_command_with_spaces() {
+        let line = "user     12345  1.5  2.3  54321  9876 pts/0    S+   10:00   0:01 /usr/bin/program --arg value";
+        let result = parse_process_line(line);
+        assert!(result.is_some());
+
+        let info = result.unwrap();
+        assert_eq!(info.pid, 12345);
+        assert_eq!(info.command, "/usr/bin/program --arg value");
+    }
+
+    // ========== SortField tests ==========
+
+    #[test]
+    fn test_sort_field_equality() {
+        assert_eq!(SortField::Pid, SortField::Pid);
+        assert_eq!(SortField::Cpu, SortField::Cpu);
+        assert_eq!(SortField::Mem, SortField::Mem);
+        assert_eq!(SortField::Command, SortField::Command);
+        assert_ne!(SortField::Pid, SortField::Cpu);
+    }
+
+    // ========== ProcessInfo tests ==========
+
+    #[test]
+    fn test_process_info_clone() {
+        let info = ProcessInfo {
+            pid: 1234,
+            user: "test".to_string(),
+            cpu: 1.5,
+            mem: 2.5,
+            vsz: 1000,
+            rss: 500,
+            tty: "pts/0".to_string(),
+            stat: "S".to_string(),
+            start: "10:00".to_string(),
+            time: "0:01".to_string(),
+            command: "test_cmd".to_string(),
+        };
+
+        let cloned = info.clone();
+        assert_eq!(cloned.pid, info.pid);
+        assert_eq!(cloned.user, info.user);
+        assert_eq!(cloned.command, info.command);
+    }
+}

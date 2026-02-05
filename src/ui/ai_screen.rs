@@ -660,21 +660,28 @@ impl AIScreenState {
             self.input_lines[self.cursor_line] = format!("{}{}{}", before, lines[0], after);
             self.cursor_col += lines[0].chars().count();
         } else {
-            // Multi-line paste
-            // First line: combine with text before cursor
-            self.input_lines[self.cursor_line] = format!("{}{}", before, lines[0]);
+            // Multi-line paste: build new lines and splice them in
+            let mut new_lines: Vec<String> = Vec::with_capacity(lines.len());
 
-            // Middle lines: insert as new lines
-            for (i, line) in lines.iter().enumerate().skip(1).take(lines.len() - 2) {
-                self.input_lines.insert(self.cursor_line + i, line.to_string());
+            // First line: before + first pasted line
+            new_lines.push(format!("{}{}", before, lines[0]));
+
+            // Middle lines: as-is
+            for line in lines.iter().skip(1).take(lines.len() - 2) {
+                new_lines.push(line.to_string());
             }
 
-            // Last line: combine with text after cursor
+            // Last line: last pasted line + after
             let last_line = lines[lines.len() - 1];
-            let last_line_content = format!("{}{}", last_line, after);
-            self.input_lines.insert(self.cursor_line + lines.len() - 1, last_line_content);
+            new_lines.push(format!("{}{}", last_line, after));
 
-            // Update cursor position
+            // Remove current line and insert all new lines at that position
+            self.input_lines.remove(self.cursor_line);
+            for (i, line) in new_lines.into_iter().enumerate() {
+                self.input_lines.insert(self.cursor_line + i, line);
+            }
+
+            // Update cursor position to end of last pasted line (before 'after' part)
             self.cursor_line += lines.len() - 1;
             self.cursor_col = last_line.chars().count();
         }

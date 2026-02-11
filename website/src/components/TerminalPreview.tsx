@@ -22,7 +22,7 @@ export default function TerminalPreview() {
         <div className="p-4 font-mono text-sm">
           {/* Header */}
           <div className="text-center text-accent-cyan mb-2 font-bold">
-            COKACDIR v0.4.22
+            COKACDIR v0.4.23
           </div>
 
           {/* Multi panel */}

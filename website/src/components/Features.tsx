@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Columns, Bot, Keyboard, Eye, Zap, Activity, Image, Search, Palette, Settings2 } from 'lucide-react'
+import { Columns, Bot, Keyboard, Eye, Zap, Activity, Image, Search, Palette, Settings2, GitBranch, ArrowLeftRight } from 'lucide-react'
 import Card from './ui/Card'
 
 const features: { icon: typeof Zap; title: string; description: string; highlight?: boolean }[] = [
@@ -38,6 +38,16 @@ const features: { icon: typeof Zap; title: string; description: string; highligh
     icon: Settings2,
     title: 'Custom File Handlers',
     description: 'Define custom programs for each file extension. Open images in feh, videos in VLC, code in vim — with fallback support and background mode for GUI apps.',
+  },
+  {
+    icon: ArrowLeftRight,
+    title: 'Diff Compare',
+    description: 'Side-by-side folder and file comparison. Multiple compare methods (content, modified time). Git inter-commit diff support.',
+  },
+  {
+    icon: GitBranch,
+    title: 'Git Integration',
+    description: 'Built-in git status, staging, commit, log, and branch management. Compare any two commits side-by-side.',
   },
   {
     icon: Activity,

@@ -14,6 +14,8 @@ Multi-panel terminal file manager with AI-powered natural language commands.
 - **Image Viewer**: View images directly in terminal with zoom and pan support
 - **Process Manager**: Monitor and manage system processes. Sort by CPU, memory, or PID.
 - **File Search**: Find files by name pattern with recursive search
+- **Diff Compare**: Side-by-side folder and file comparison with multiple compare methods
+- **Git Integration**: Built-in git status, commit, log, branch management and inter-commit diff
 - **Customizable Themes**: Light/Dark themes with full color customization
 
 ## Installation
@@ -218,6 +220,7 @@ Press `u` on any file to open the handler setup dialog:
     }
   ],
   "active_panel_index": 0,
+  "diff_compare_method": "content",
   "theme": {
     "name": "dark"
   },
@@ -303,6 +306,9 @@ Quickly navigate to frequently used directories.
 | `i` | File info |
 | `e` | Edit file |
 | `p` | Process manager |
+| `g` | Git screen |
+| `8` | Diff compare |
+| `7` | Git log diff |
 | `` ` `` | Settings |
 
 ### macOS Only
@@ -406,6 +412,7 @@ code-insiders /path/to/current/folder
 | `Ctrl+F` | Find |
 | `Ctrl+H` | Find & Replace |
 | `Ctrl+G` | Go to line |
+| `Ctrl+W` | Toggle word wrap |
 | `Alt+↑/↓` | Move line up/down |
 | `Esc` | Close editor |
 
@@ -433,6 +440,138 @@ code-insiders /path/to/current/folder
 | `↑`/`↓`/`←`/`→` | Pan image |
 | `PgUp`/`PgDn` | Previous/Next image |
 | `Esc`/`q` | Close viewer |
+
+### Diff Compare
+
+Compare two folders side-by-side to see what files were added, removed, or modified.
+
+#### How to Start a Diff
+
+**With 2 panels** (most common):
+
+1. Navigate the left panel to the first folder
+2. Navigate the right panel to the second folder
+3. Press `8` — the diff screen opens immediately
+
+**With 3+ panels**:
+
+1. Move focus to the first panel you want to compare
+2. Press `8` — the panel border turns pink (selected)
+3. Move focus to the second panel (use `←`/`→`)
+4. Press `8` again — the diff screen opens
+5. Press `Esc` to cancel selection at any time
+
+#### Compare Methods
+
+Change the compare method in Settings (`` ` `` key):
+
+| Method | Description |
+|--------|-------------|
+| `content` | Compares actual file contents byte-by-byte (most accurate, slower for large files) |
+| `modified_time` | Compares file modification timestamps only (fast) |
+| `content_and_time` | Files are "same" only if both content AND timestamp match |
+
+#### Diff Screen Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Move cursor |
+| `PgUp`/`PgDn` | Page scroll |
+| `Home`/`End` | Go to first/last item |
+| `Enter` | View file content diff (for files) / Toggle expand (for directories) |
+| `→` | Expand directory |
+| `←` | Collapse directory |
+| `e` | Expand all subdirectories |
+| `c` | Collapse all subdirectories |
+| `Space` | Select/deselect item |
+| `F` | Cycle filter: All → Different Only → Left Only → Right Only |
+| `N`/`S`/`D`/`Y` | Sort by name / size / date / type |
+| `Esc` | Return to file panel |
+
+#### File Content Diff
+
+When you press `Enter` on a file in the diff screen, a side-by-side file comparison opens:
+
+- Lines that are the same appear normally
+- Modified lines are highlighted in yellow
+- Lines only in the left file are highlighted in green
+- Lines only in the right file are highlighted in blue
+- Inline character-level changes are highlighted within modified lines
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Scroll line by line |
+| `PgUp`/`PgDn` | Page scroll |
+| `Home`/`End` | Go to start/end |
+| `n` | Jump to next change |
+| `N` | Jump to previous change |
+| `Esc` | Return to diff screen |
+
+#### Git Commit Diff
+
+Compare any two git commits to see what changed between them:
+
+1. Navigate to a directory inside a git repository
+2. Press `7` to open the Git Log Diff dialog
+3. A list of recent commits appears — use `↑`/`↓` to navigate
+4. Press `Space` to select the first commit (marked with `[*]`)
+5. Navigate to another commit and press `Space` to select it
+6. Press `Enter` to compare — the diff screen opens showing all file differences between the two commits
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Navigate commits |
+| `PgUp`/`PgDn` | Page scroll |
+| `Space` | Toggle commit selection (select exactly 2) |
+| `Tab` | Switch between Compare / Cancel buttons |
+| `Enter` | Compare selected commits |
+| `Esc` | Cancel |
+
+### Git Screen
+
+Built-in git interface with three tabs: Commit, Log, and Branch.
+
+1. Navigate to a directory inside a git repository
+2. Press `g` to open the Git Screen
+
+#### Commit Tab
+
+Stage files and create commits:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Navigate changed files |
+| `Space` | Stage/unstage selected file |
+| `a` | Stage all files |
+| `c` | Open commit message input (type message, then `Enter` to commit) |
+
+#### Log Tab
+
+View commit history:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Navigate commits |
+| `PgUp`/`PgDn` | Page scroll |
+
+#### Branch Tab
+
+Manage branches:
+
+| Key | Action |
+|-----|--------|
+| `↑`/`↓` | Navigate branches |
+| `Enter` | Checkout branch |
+| `n` | Create new branch |
+| `d` | Delete branch |
+
+#### Common
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch tabs (Commit → Log → Branch) |
+| `r` | Refresh |
+| `Esc` | Close git screen |
 
 ## Theme Customization
 
@@ -525,7 +664,7 @@ Theme files are JSON with the following main sections:
   "editor": { /* ... */ },
   "viewer": { /* ... */ },
   "dialog": { /* ... */ }
-  // ... 19 UI component sections total
+  // ... 22 UI component sections total
 }
 ```
 
@@ -592,6 +731,9 @@ You can add unlimited custom themes by creating new JSON files in the themes fol
 | `syntax` | Code highlighting | keyword, string, comment |
 | `process_manager` | Process list | cpu_high, mem_high |
 | `ai_screen` | AI interface | user_prefix, assistant_prefix |
+| `diff` | Diff compare screen | same_text, modified_text, cursor_bg |
+| `diff_file_view` | File content diff | inline_change_bg, line_number |
+| `git_screen` | Git interface | file_staged, file_modified, log_hash |
 
 ### Tips
 

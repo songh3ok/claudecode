@@ -256,6 +256,11 @@ impl SftpSession {
         Ok((ssh, sftp))
     }
 
+    /// Check if a remote directory exists
+    pub fn dir_exists(&self, path: &str) -> bool {
+        self.list_dir(path).is_ok()
+    }
+
     /// List directory contents via SFTP
     pub fn list_dir(&self, path: &str) -> Result<Vec<SftpFileEntry>, String> {
         let sftp = self.sftp.as_ref().ok_or("Not connected")?;

@@ -16,6 +16,7 @@ Multi-panel terminal file manager with AI-powered natural language commands.
 - **File Search**: Find files by name pattern with recursive search
 - **Diff Compare**: Side-by-side folder and file comparison with multiple compare methods
 - **Git Integration**: Built-in git status, commit, log, branch management and inter-commit diff
+- **Remote SSH/SFTP**: Browse remote servers via SSH/SFTP. Password and key file authentication with saved profiles.
 - **Customizable Themes**: Light/Dark themes with full color customization
 
 ## Installation
@@ -572,6 +573,104 @@ Manage branches:
 | `Tab` | Switch tabs (Commit → Log → Branch) |
 | `r` | Refresh |
 | `Esc` | Close git screen |
+
+### Remote SSH/SFTP
+
+Browse remote servers via SSH/SFTP directly from COKACDIR. Remote directories appear in panels with the same interface as local files.
+
+#### Connecting to a Remote Server
+
+1. Press `/` to open Go to Path dialog
+2. Type `user@host:/path` (e.g., `admin@example.com:/home/admin`)
+3. If a saved profile exists, it connects automatically
+4. Otherwise, the Remote Connect dialog appears for authentication
+
+You can also specify a custom port: `user@host:2222:/path`
+
+#### Remote Connect Dialog
+
+```
+┌─ Remote Connect ────────────────────┐
+│      Host: example.com              │
+│      Port: 22                       │
+│      User: admin                    │
+│      Auth: Password (Tab to toggle) │
+│  Password: ********                 │
+│                                     │
+│ Tab/↑↓:navigate Enter:connect       │
+└─────────────────────────────────────┘
+```
+
+| Key | Action |
+|-----|--------|
+| `Tab`/`↓` | Next field (toggles auth type on Auth field) |
+| `Shift+Tab`/`↑` | Previous field |
+| `Enter` | Connect |
+| `Esc` | Cancel |
+
+**Authentication methods:**
+- **Password**: Enter password directly
+- **Key File**: Specify path to PEM key file (default: `~/.ssh/id_rsa`) with optional passphrase
+
+After successful connection, you can save the profile for quick reconnect.
+
+#### Saved Profiles & Bookmarks
+
+- Saved remote profiles appear in the bookmark list (press `/`) with `[SSH]` prefix
+- Select a saved server and press `Enter` to reconnect instantly
+- Remote bookmarks are color-coded to distinguish from local bookmarks
+- Bookmark remote directories with `'` just like local directories
+- Use `Ctrl+E` to edit a remote profile's connection settings
+- Use `Ctrl+D` to delete a profile or bookmark from the list
+
+#### Remote File Operations
+
+| Operation | Key | Description |
+|-----------|-----|-------------|
+| Browse | `Enter` | Enter directory |
+| Parent dir | `Esc` | Go to parent directory |
+| Create dir | `k` | Create directory on remote |
+| Create file | `m` | Create empty file on remote |
+| Delete | `x`/`Del` | Delete file/directory on remote |
+| Rename | `r` | Rename file/directory on remote |
+| Edit file | `Enter`/`e` | Download to temp, edit, auto-upload on save |
+| View image | `Enter` | Download and view in image viewer |
+
+#### File Transfer
+
+Copy or move files between local and remote panels:
+
+1. Select files in the source panel (`Space` or `Shift+↑/↓`)
+2. Press `Ctrl+C` (copy) or `Ctrl+X` (cut)
+3. Switch to the target panel (local or remote)
+4. Press `Ctrl+V` to paste — transfer starts with progress display
+
+**Transfer method**: Uses `rsync` with progress tracking. Falls back to `scp` if rsync is unavailable.
+
+#### Disconnecting
+
+- Press `/` and enter a local path (`/` or `~` prefix) to disconnect and return to local
+- Press `1` (Home key) to disconnect and go to local home directory
+
+#### Requirements
+
+Remote browsing works out of the box. For file transfer:
+
+| Tool | Required | Purpose |
+|------|----------|---------|
+| `rsync` | Recommended | File transfer with progress display |
+| `scp` | Fallback | File transfer without progress |
+| `sshpass` | For password auth | Passes password to rsync/scp |
+
+```bash
+# Ubuntu/Debian
+sudo apt install rsync sshpass
+
+# macOS
+brew install rsync
+```
+
+**Note**: Saved passwords are stored in plaintext in `~/.cokacdir/settings.json`. For security-sensitive environments, use key file authentication.
 
 ## Theme Customization
 

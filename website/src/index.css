@@ -62,6 +62,22 @@ body {
   background-size: 50px 50px;
 }
 
+/* Typing cursor animation */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background-color: currentColor;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: blink-cursor 0.7s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 /* Gradient text */
 .gradient-text {
   background: linear-gradient(135deg, #00D4FF 0%, #0078D4 50%, #8B5CF6 100%);

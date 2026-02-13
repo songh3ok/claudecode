@@ -5562,7 +5562,7 @@ impl App {
                     panel.path = PathBuf::from("/");
                     panel.selected_index = 0;
                     panel.load_files();
-                    self.show_message(&format!("Path not found: {} — moved to /", original_path));
+                    self.show_extension_handler_error(&format!("Path not found: {} — moved to /", original_path));
                 } else {
                     self.show_message(&format!("Connected to {}@{}", profile.user, profile.host));
                 }

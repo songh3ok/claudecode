@@ -57,17 +57,8 @@ export default function Hero() {
           An easy terminal explorer for vibe coders who are scared of the terminal
         </motion.p>
 
-        {/* Subtitle */}
-        <motion.p
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.3 }}
-          className="text-lg text-zinc-400 max-w-2xl mx-auto mb-10"
-        >
-          Just press <kbd className="px-2 py-1 bg-zinc-800 rounded text-accent-cyan font-mono">.</kbd> and tell the AI what you need.
-          <br />
-          <span className="text-zinc-500">Move files, organize folders, find duplicates — all in plain language.</span>
-        </motion.p>
+        {/* Spacer before CTA */}
+        <div className="mb-10" />
 
         {/* CTA buttons */}
         <motion.div

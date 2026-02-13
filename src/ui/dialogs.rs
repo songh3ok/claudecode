@@ -2928,12 +2928,31 @@ fn handle_goto_dialog_input(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                 return false;
                             }
                         } else if let Some(entry) = mixed_entries.get(selected_idx) {
-                            if crate::services::remote::parse_remote_path(entry).is_some() {
-                                // Selected a remote bookmark
-                                let entry = entry.clone();
-                                app.dialog = None;
-                                app.execute_goto(&entry);
-                                return false;
+                            if let Some((user, host, port, path)) = crate::services::remote::parse_remote_path(entry) {
+                                // Selected a remote bookmark — check if same server is already connected
+                                let same_server = app.active_panel().remote_ctx.as_ref().map_or(false, |ctx| {
+                                    ctx.profile.user == user && ctx.profile.host == host && ctx.profile.port == port
+                                });
+                                if same_server {
+                                    // Already connected to same server — validate path
+                                    let exists = app.active_panel().remote_ctx.as_ref()
+                                        .map_or(false, |ctx| ctx.session.dir_exists(&path));
+                                    if exists {
+                                        let entry = entry.clone();
+                                        app.dialog = None;
+                                        app.execute_goto(&entry);
+                                        return false;
+                                    } else {
+                                        app.dialog = None;
+                                        app.show_extension_handler_error(&format!("Path not found: {}", entry));
+                                    }
+                                } else {
+                                    // Different server or not connected — proceed with goto
+                                    let entry = entry.clone();
+                                    app.dialog = None;
+                                    app.execute_goto(&entry);
+                                    return false;
+                                }
                             } else {
                                 // Selected a local bookmark
                                 let path = PathBuf::from(entry);
@@ -2944,7 +2963,8 @@ fn handle_goto_dialog_input(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                     app.show_message(&format!("Moved to: {}", entry));
                                     return false;
                                 } else {
-                                    app.show_message(&format!("Path not found: {}", entry));
+                                    app.dialog = None;
+                                    app.show_extension_handler_error(&format!("Path not found: {}", entry));
                                 }
                             }
                         }

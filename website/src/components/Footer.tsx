@@ -1,4 +1,4 @@
-import { Github, FileText, Cpu } from 'lucide-react'
+import { Github, FileText, Cpu, BookOpen } from 'lucide-react'
 
 export default function Footer() {
   return (
@@ -26,6 +26,15 @@ export default function Footer() {
               <Cpu className="w-5 h-5" />
               <span className="text-sm">Built with Rust</span>
             </span>
+            <a
+              href="https://github.com/kstost/cokacdir#readme"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 text-zinc-400 hover:text-white transition-colors"
+            >
+              <BookOpen className="w-5 h-5" />
+              <span className="text-sm">Documentation</span>
+            </a>
             <a
               href="https://github.com/kstost/cokacdir/blob/main/LICENSE"
               target="_blank"

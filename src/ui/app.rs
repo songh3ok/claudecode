@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 use chrono::{DateTime, Local};
 
 use crate::config::Settings;
@@ -622,6 +622,9 @@ pub struct FileOperationProgress {
 
     // Store last error before result is created
     last_error: Option<String>,
+
+    // Timestamp when the operation started (for display delay)
+    pub started_at: Instant,
 }
 
 impl FileOperationProgress {
@@ -641,6 +644,7 @@ impl FileOperationProgress {
             completed_bytes: 0,
             result: None,
             last_error: None,
+            started_at: Instant::now(),
         }
     }
 
@@ -679,7 +683,7 @@ impl FileOperationProgress {
                                 }
                             }
                             ProgressMessage::FileCompleted(_) => {
-                                self.current_file_progress = 0.0;
+                                self.current_file_progress = 1.0;
                             }
                             ProgressMessage::TotalProgress(completed_files, total_files, completed_bytes, total_bytes) => {
                                 self.completed_files = completed_files;

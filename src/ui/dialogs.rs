@@ -1588,6 +1588,11 @@ fn draw_progress_dialog(frame: &mut Frame, app: &App, area: Rect, theme: &Theme)
         None => return,
     };
 
+    // Don't show dialog for first 200ms to avoid flicker on fast operations
+    if progress.started_at.elapsed() < std::time::Duration::from_millis(200) {
+        return;
+    }
+
     let title = match progress.operation_type {
         FileOperationType::Copy => " Copying ",
         FileOperationType::Move => " Moving ",

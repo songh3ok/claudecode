@@ -1,0 +1,1074 @@
+import SectionHeading from '../ui/SectionHeading'
+import TipBox from '../ui/TipBox'
+import StepByStep from '../ui/StepByStep'
+import { useLanguage } from '../LanguageContext'
+
+export default function TelegramBot() {
+  const { lang, t } = useLanguage()
+
+  return (
+    <section className="mb-16">
+      <SectionHeading id="telegram-bot">{t('Telegram Remote Control', 'Telegram \uc6d0\uaca9 \uc81c\uc5b4')}</SectionHeading>
+
+      {lang === 'ko' ? (
+        <>
+          <p className="text-zinc-400 mb-6 leading-relaxed">
+            cokacdir의 AI 기능과 파일 관리 기능을 <strong className="text-white">Telegram 메신저</strong>를 통해 원격으로 사용할 수 있습니다.
+            외출 중에 스마트폰으로 서버의 파일을 확인하거나, AI에게 질문하거나, 쉘 명령어를 실행하는 것이 가능합니다.
+          </p>
+
+          <TipBox variant="note">
+            이 기능을 사용하려면 Telegram 계정과 Bot API 토큰이 필요합니다.
+            아직 Telegram을 사용하지 않는다면 이 섹션은 건너뛰어도 됩니다.
+          </TipBox>
+
+          {/* ========== Bot 만들기 ========== */}
+          <SectionHeading id="telegram-create-bot" level={3}>Telegram Bot 만들기</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            먼저 Telegram에서 나만의 Bot을 만들어야 합니다.
+            Bot은 Telegram에서 자동으로 메시지를 주고받을 수 있는 특수한 계정입니다.
+            Telegram이 공식 제공하는 <strong className="text-white">@BotFather</strong>라는 도구를 통해 만들 수 있으며,
+            과정은 매우 간단합니다.
+          </p>
+
+          <StepByStep steps={[
+            {
+              title: 'Telegram 앱 설치',
+              description: (
+                <span>
+                  아직 Telegram이 없다면 스마트폰(iOS/Android) 또는 PC에서 Telegram을 설치합니다.
+                  계정 생성 시 전화번호 인증이 필요합니다.
+                  이미 Telegram을 사용 중이라면 이 단계는 건너뛰세요.
+                </span>
+              )
+            },
+            {
+              title: '@BotFather 검색하여 대화 시작',
+              description: (
+                <span>
+                  Telegram 앱 상단의 검색창에 <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">@BotFather</code>를 입력합니다.
+                  파란색 체크 표시가 있는 공식 계정을 선택하고, 대화 화면에서
+                  <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">/start</code> 버튼을 누릅니다.
+                  BotFather가 사용 가능한 명령어 목록과 함께 인사 메시지를 보내줍니다.
+                </span>
+              )
+            },
+            {
+              title: '/newbot 명령어 입력',
+              description: (
+                <span>
+                  BotFather에게 <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">/newbot</code>이라고 입력합니다.
+                  BotFather가 새로운 Bot을 만들기 위한 질문을 시작합니다.
+                </span>
+              )
+            },
+            {
+              title: 'Bot 이름 입력',
+              description: (
+                <span>
+                  BotFather가 <strong className="text-zinc-300">"Alright, a new bot. How are we going to call it? Please choose a name for your bot."</strong>라고 물어봅니다.
+                  Bot의 표시 이름을 입력합니다. 이것은 대화 목록에 보이는 이름으로, 자유롭게 정할 수 있습니다.
+                  <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                    My Cokacdir Bot
+                  </code>
+                </span>
+              )
+            },
+            {
+              title: 'Bot 사용자명(username) 입력',
+              description: (
+                <span>
+                  BotFather가 <strong className="text-zinc-300">"Good. Now let's choose a username for your bot. It must end in 'bot'."</strong>라고 물어봅니다.
+                  Bot의 고유한 사용자명을 입력합니다. 반드시 <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">bot</code>으로 끝나야 합니다.
+                  이미 사용 중인 이름이면 다른 이름을 시도하세요.
+                  <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                    my_cokacdir_bot
+                  </code>
+                </span>
+              )
+            },
+            {
+              title: 'API 토큰 복사',
+              description: (
+                <span>
+                  Bot 생성이 완료되면 BotFather가 축하 메시지와 함께 <strong className="text-white">API 토큰</strong>을 알려줍니다.
+                  메시지 안에 다음과 같은 형태의 토큰이 있습니다:
+                  <code className="block text-accent-cyan font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2 mb-2">
+                    123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+                  </code>
+                  이 토큰을 <strong className="text-zinc-300">길게 눌러서 복사</strong>해 두세요. 다음 단계에서 cokacdir에 등록할 때 사용합니다.
+                </span>
+              )
+            },
+          ]} />
+
+          {/* BotFather 대화 시뮬레이션 */}
+          <p className="text-zinc-400 mb-3 text-sm leading-relaxed">
+            전체 과정을 대화로 보면 다음과 같습니다:
+          </p>
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-6">
+            <div className="space-y-3 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">나:</span>
+                <code className="text-accent-cyan font-mono">/start</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">I can help you create and manage Telegram bots. ...</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">나:</span>
+                <code className="text-accent-cyan font-mono">/newbot</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">Alright, a new bot. How are we going to call it? Please choose a name for your bot.</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">나:</span>
+                <span className="text-zinc-300">My Cokacdir Bot</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">Good. Now let's choose a username for your bot. It must end in `bot`. Like this, for example: TetrisBot or tetris_bot.</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">나:</span>
+                <span className="text-zinc-300">my_cokacdir_bot</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">
+                  Done! Congratulations on your new bot. You will find it at t.me/my_cokacdir_bot.<br/>
+                  Use this token to access the HTTP API:<br/>
+                  <code className="text-accent-cyan font-mono bg-bg-elevated px-1.5 py-0.5 rounded">123456789:ABCdefGHIjklMNOpqrsTUVwxyz</code>
+                  <br/>Keep your token secure and store it safely.
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-zinc-700">
+              <p className="text-zinc-500 text-xs">
+                {'↑'} 마지막 메시지의 <code className="text-accent-cyan font-mono">123456789:ABCdef...</code> 부분이 API 토큰입니다. 이것을 복사하세요.
+              </p>
+            </div>
+          </div>
+
+          <TipBox variant="warning">
+            API 토큰은 비밀번호와 같습니다. 다른 사람에게 공유하지 마세요.
+            토큰이 유출되면 누구나 여러분의 Bot을 조작할 수 있습니다.
+            만약 토큰이 유출되었다면, BotFather에게 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">/revoke</code>를 보내서 토큰을 재발급 받으세요.
+          </TipBox>
+
+          {/* ========== 플랫폼별 준비사항 ========== */}
+          <SectionHeading id="telegram-setup" level={3}>서버 설정 및 시작</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            Bot 서버는 cokacdir가 설치된 컴퓨터에서 실행됩니다.
+            운영체제에 따라 준비 방법이 다르므로, 해당하는 플랫폼의 안내를 따라주세요.
+          </p>
+
+          {/* 플랫폼별 안내 */}
+          <div className="space-y-4 mb-6">
+            {/* macOS */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
+              <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-green-500/20 text-green-400 text-sm flex items-center justify-center flex-shrink-0">{'🍎'}</span>
+                macOS
+              </h4>
+              <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+                macOS에서는 별도의 준비 없이 바로 사용할 수 있습니다.
+                <strong className="text-zinc-300"> Terminal.app</strong> 또는 <strong className="text-zinc-300">iTerm2</strong>를 열고 아래 명령어를 실행하세요.
+              </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono">
+                <div className="text-zinc-500 mb-1"># 토큰 등록</div>
+                <div className="text-accent-cyan">cokacdir --ccsetkey YOUR_BOT_TOKEN</div>
+                <div className="text-zinc-500 mt-2 mb-1"># 서버 시작</div>
+                <div className="text-accent-cyan">cokacdir --ccserver</div>
+              </div>
+              <p className="text-zinc-500 text-xs mt-2">
+                macOS의 경로 예시: <code className="font-mono">/Users/username/Documents</code>
+              </p>
+            </div>
+
+            {/* Linux */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
+              <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-yellow-500/20 text-yellow-400 text-sm flex items-center justify-center flex-shrink-0">{'🐧'}</span>
+                Linux
+              </h4>
+              <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+                Linux에서도 별도의 준비 없이 바로 사용할 수 있습니다.
+                Ubuntu, Debian, Fedora, Arch 등 모든 배포판에서 동작합니다.
+                터미널을 열고 아래 명령어를 실행하세요.
+              </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono">
+                <div className="text-zinc-500 mb-1"># 토큰 등록</div>
+                <div className="text-accent-cyan">cokacdir --ccsetkey YOUR_BOT_TOKEN</div>
+                <div className="text-zinc-500 mt-2 mb-1"># 서버 시작</div>
+                <div className="text-accent-cyan">cokacdir --ccserver</div>
+              </div>
+              <p className="text-zinc-500 text-xs mt-2">
+                Linux의 경로 예시: <code className="font-mono">/home/username/projects</code>
+              </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mt-3">
+                <div className="text-zinc-500 mb-1">서버/헤드리스 환경에서 실행</div>
+                <p className="text-zinc-400 leading-relaxed">
+                  GUI가 없는 서버에서도 Bot 서버를 실행할 수 있습니다.
+                  SSH로 서버에 접속한 뒤 동일한 명령어를 사용하면 됩니다.
+                  서버가 재부팅되어도 자동으로 시작하려면 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">systemd</code> 서비스를 등록하거나
+                  <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">crontab</code>에 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">@reboot</code> 항목을 추가하세요.
+                </p>
+              </div>
+            </div>
+
+            {/* Windows */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
+              <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 text-sm flex items-center justify-center flex-shrink-0">{'🪟'}</span>
+                Windows (WSL 필수)
+              </h4>
+              <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+                cokacdir는 Unix 기반 프로그램이므로, Windows에서는 <strong className="text-white">WSL (Windows Subsystem for Linux)</strong>을 통해 실행해야 합니다.
+                WSL은 Windows 안에서 Linux 환경을 실행할 수 있게 해주는 공식 기능입니다.
+              </p>
+
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
+                <div className="text-zinc-400 font-semibold mb-2">WSL이 아직 설치되지 않은 경우:</div>
+                <p className="text-zinc-400 mb-2 leading-relaxed">
+                  <strong className="text-zinc-300">PowerShell</strong>을 <strong className="text-zinc-300">관리자 권한</strong>으로 열고 다음 명령어를 실행합니다:
+                </p>
+                <code className="block text-accent-cyan font-mono bg-bg-card px-3 py-2 rounded">
+                  wsl --install
+                </code>
+                <p className="text-zinc-400 mt-2 leading-relaxed">
+                  설치가 완료되면 컴퓨터를 재시작합니다. 재시작 후 자동으로 Ubuntu가 설치되며,
+                  사용자 이름과 비밀번호를 설정하라는 안내가 나옵니다.
+                </p>
+              </div>
+
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
+                <div className="text-zinc-400 font-semibold mb-2">WSL에서 cokacdir 실행:</div>
+                <p className="text-zinc-400 mb-2 leading-relaxed">
+                  시작 메뉴에서 <strong className="text-zinc-300">Ubuntu</strong> (또는 설치한 Linux 배포판)를 실행합니다.
+                  열리는 터미널이 Linux 환경입니다. 여기서 cokacdir를 설치하고 Bot 서버를 실행합니다.
+                </p>
+                <div className="font-mono">
+                  <div className="text-zinc-500 mb-1"># WSL 터미널에서 실행</div>
+                  <div className="text-accent-cyan">cokacdir --ccsetkey YOUR_BOT_TOKEN</div>
+                  <div className="text-accent-cyan">cokacdir --ccserver</div>
+                </div>
+              </div>
+
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm">
+                <div className="text-zinc-400 font-semibold mb-2">Windows 파일에 접근하기:</div>
+                <p className="text-zinc-400 leading-relaxed">
+                  WSL 안에서 Windows의 파일에 접근할 수 있습니다.
+                  Windows의 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">C:\Users\username\Documents</code> 폴더는
+                  WSL에서 <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">/mnt/c/Users/username/Documents</code> 경로로 접근 가능합니다.
+                </p>
+                <code className="block text-zinc-500 font-mono text-xs bg-bg-card px-3 py-2 rounded mt-2">
+                  /start /mnt/c/Users/username/Documents
+                </code>
+              </div>
+            </div>
+          </div>
+
+          <TipBox variant="note">
+            모든 플랫폼에서 공통으로 <strong className="text-zinc-300">Claude CLI</strong>가 설치되어 있어야 AI 기능이 동작합니다.
+            Claude CLI가 없으면 Bot 서버는 시작되지만, AI 질문에는 에러가 발생합니다.
+          </TipBox>
+
+          {/* 백그라운드 실행 */}
+          <h4 className="text-white font-semibold mt-6 mb-3">백그라운드에서 계속 실행하기</h4>
+          <p className="text-zinc-400 mb-4 leading-relaxed text-sm">
+            터미널을 닫아도 Bot 서버가 계속 동작하게 하려면 백그라운드 실행을 사용합니다.
+          </p>
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-4 mb-4">
+            <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
+              <div className="text-zinc-500 mb-1"># 백그라운드 실행 (macOS, Linux, WSL 공통)</div>
+              <div className="text-accent-cyan">nohup cokacdir --ccserver &amp;</div>
+            </div>
+            <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
+              <div className="text-zinc-500 mb-1"># 실행 중인 Bot 서버 확인</div>
+              <div className="text-accent-cyan">ps aux | grep ccserver</div>
+            </div>
+            <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono">
+              <div className="text-zinc-500 mb-1"># Bot 서버 종료</div>
+              <div className="text-accent-cyan">pkill -f "cokacdir --ccserver"</div>
+            </div>
+          </div>
+
+          <TipBox>
+            서버가 시작되면 Telegram으로 인사 메시지가 자동 전송됩니다.
+            처음 실행 시에는 Chat ID가 아직 등록되지 않았으므로, Bot에게 아무 메시지나 한 번 보내면
+            Chat ID가 자동으로 저장되어 다음 시작부터 인사 메시지가 전송됩니다.
+          </TipBox>
+
+          {/* ========== 사용 가능한 명령어 ========== */}
+          <SectionHeading id="telegram-commands" level={3}>사용 가능한 명령어</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            Telegram Bot에서 사용할 수 있는 명령어들입니다.
+          </p>
+
+          <div className="space-y-3 mb-6">
+            {/* /start */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/start &lt;path&gt;</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                AI 세션을 시작합니다. <code className="text-zinc-300 font-mono bg-bg-elevated px-1 py-0.5 rounded">path</code>는 작업할 디렉토리 경로입니다.
+                이미 해당 경로의 세션이 있으면 자동으로 복원되고, 마지막 5개의 대화 내역이 표시됩니다.
+              </p>
+              <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                /start /home/user/project
+              </code>
+            </div>
+
+            {/* /clear */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/clear</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                현재 AI 세션을 초기화합니다. 대화 기록이 삭제되고 새로운 대화를 시작할 수 있습니다.
+              </p>
+            </div>
+
+            {/* /pwd */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/pwd</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                현재 세션이 바라보고 있는 작업 디렉토리 경로를 확인합니다.
+              </p>
+            </div>
+
+            {/* /down */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/down &lt;filepath&gt;</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                서버의 파일을 Telegram으로 다운로드합니다. 절대 경로 또는 현재 세션 경로 기준 상대 경로를 사용할 수 있습니다.
+              </p>
+              <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                /down report.txt
+              </code>
+            </div>
+
+            {/* ! 쉘 명령어 */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">!&lt;command&gt;</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                쉘 명령어를 직접 실행합니다. 현재 세션 경로를 작업 디렉토리로 사용합니다.
+                사용자 입력이 필요한 명령어(예: <code className="text-zinc-300 font-mono bg-bg-elevated px-1 py-0.5 rounded">read</code>)는 자동으로 종료됩니다.
+              </p>
+              <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                !ls -la
+              </code>
+            </div>
+
+            {/* 파일 업로드 */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-accent-cyan font-semibold">File / Photo Upload</span>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Telegram에서 파일이나 사진을 보내면 현재 세션 경로에 자동으로 저장됩니다.
+                스마트폰의 사진이나 문서를 서버로 빠르게 전송할 때 유용합니다.
+              </p>
+            </div>
+
+            {/* 일반 텍스트 */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-accent-cyan font-semibold">General Text</span>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                명령어가 아닌 일반 텍스트를 입력하면 AI에게 전달됩니다.
+                AI의 응답은 실시간으로 스트리밍되어 표시됩니다.
+              </p>
+            </div>
+          </div>
+
+          {/* ========== 실전 사용 워크플로우 ========== */}
+          <SectionHeading id="telegram-workflow" level={3}>실전 사용 워크플로우</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            실제로 어떻게 활용하는지 구체적인 예시를 통해 알아봅시다.
+          </p>
+
+          {/* 워크플로우 1: 프로젝트 파일 확인 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">1</span>
+              프로젝트 파일 확인하기
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">/start /home/user/my-project</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">Session started at /home/user/my-project.</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">!ls -la</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400 font-mono text-xs">drwxr-xr-x 5 user user 4096 ... src/<br/>-rw-r--r-- 1 user user 1234 ... README.md<br/>...</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <span className="text-zinc-300">이 프로젝트의 구조를 설명해줘</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(AI가 디렉토리 구조를 분석하여 설명)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 워크플로우 2: 로그 분석 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">2</span>
+              서버 로그 분석하기
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">/start /var/log</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">!tail -20 syslog</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400 font-mono text-xs">(최근 20줄의 로그 출력)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <span className="text-zinc-300">이 로그에서 에러가 있는지 분석해줘</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(AI가 로그를 분석하여 에러 보고)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 워크플로우 3: 파일 전송 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">3</span>
+              파일 주고받기
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">/start /home/user/documents</code>
+              </div>
+              <p className="text-zinc-500 italic ml-16">서버에서 파일 다운로드:</p>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">/down report.pdf</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(report.pdf 파일이 Telegram으로 전송됨)</span>
+              </div>
+              <p className="text-zinc-500 italic ml-16 mt-2">스마트폰에서 서버로 파일 업로드:</p>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <span className="text-zinc-300">(Telegram 첨부 버튼으로 사진/파일 전송)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">Saved: /home/user/documents/photo_abc123.jpg (45678 bytes)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 워크플로우 4: Git 작업 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-6">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">4</span>
+              Git 상태 확인 및 관리
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">/start /home/user/my-repo</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">!git status</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400 font-mono text-xs">On branch main<br/>Changes not staged for commit:<br/>&nbsp;&nbsp;modified: src/app.rs</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <code className="text-accent-cyan font-mono">!git diff src/app.rs</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(변경 내용 diff 출력)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">나:</span>
+                <span className="text-zinc-300">이 변경사항을 요약해줘</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(AI가 코드 변경 내용을 분석하여 요약)</span>
+              </div>
+            </div>
+          </div>
+
+          <TipBox>
+            <code className="text-accent-cyan font-mono">!</code> 명령어와 AI 질문을 조합하면 강력합니다.
+            먼저 <code className="text-accent-cyan font-mono">!</code>로 현재 상태를 확인하고, 그 결과에 대해 AI에게 분석이나 조언을 요청해 보세요.
+          </TipBox>
+
+          <TipBox variant="warning">
+            <code className="text-accent-cyan font-mono">!</code> 명령어는 서버에서 직접 실행되므로, 삭제나 수정 명령어는 신중하게 사용하세요.
+            <code className="text-zinc-300 font-mono"> rm</code>, <code className="text-zinc-300 font-mono">mv</code> 같은 명령어는 되돌릴 수 없습니다.
+          </TipBox>
+        </>
+      ) : (
+        <>
+          <p className="text-zinc-400 mb-6 leading-relaxed">
+            You can use cokacdir's AI features and file management remotely through <strong className="text-white">Telegram messenger</strong>.
+            Check server files from your smartphone while on the go, ask AI questions, or run shell commands.
+          </p>
+
+          <TipBox variant="note">
+            This feature requires a Telegram account and a Bot API token.
+            If you don't use Telegram, feel free to skip this section.
+          </TipBox>
+
+          {/* ========== Create Bot ========== */}
+          <SectionHeading id="telegram-create-bot" level={3}>Creating a Telegram Bot</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            First, you need to create your own Bot on Telegram.
+            A Bot is a special account that can send and receive messages automatically.
+            You can create one through <strong className="text-white">@BotFather</strong>, Telegram's official bot management tool.
+            The process is very simple.
+          </p>
+
+          <StepByStep steps={[
+            {
+              title: 'Install Telegram',
+              description: (
+                <span>
+                  If you don't have Telegram yet, install it on your smartphone (iOS/Android) or PC.
+                  Phone number verification is required when creating an account.
+                  If you already use Telegram, skip this step.
+                </span>
+              )
+            },
+            {
+              title: 'Search for @BotFather and start a chat',
+              description: (
+                <span>
+                  In the Telegram app, type <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">@BotFather</code> in the search bar.
+                  Select the official account with the blue checkmark, and tap
+                  the <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">/start</code> button in the chat.
+                  BotFather will send a welcome message with a list of available commands.
+                </span>
+              )
+            },
+            {
+              title: 'Type /newbot',
+              description: (
+                <span>
+                  Send <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">/newbot</code> to BotFather.
+                  It will start asking questions to create your new bot.
+                </span>
+              )
+            },
+            {
+              title: 'Enter a bot name',
+              description: (
+                <span>
+                  BotFather asks: <strong className="text-zinc-300">"Alright, a new bot. How are we going to call it? Please choose a name for your bot."</strong>
+                  Enter a display name for your bot. This is the name shown in chat lists — choose anything you like.
+                  <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                    My Cokacdir Bot
+                  </code>
+                </span>
+              )
+            },
+            {
+              title: 'Enter a bot username',
+              description: (
+                <span>
+                  BotFather asks: <strong className="text-zinc-300">"Good. Now let's choose a username for your bot. It must end in 'bot'."</strong>
+                  Enter a unique username for your bot. It must end with <code className="text-accent-cyan font-mono bg-bg-card px-1.5 py-0.5 rounded">bot</code>.
+                  If the name is already taken, try a different one.
+                  <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                    my_cokacdir_bot
+                  </code>
+                </span>
+              )
+            },
+            {
+              title: 'Copy the API Token',
+              description: (
+                <span>
+                  Once created, BotFather sends a congratulations message along with the <strong className="text-white">API token</strong>.
+                  The token looks like this:
+                  <code className="block text-accent-cyan font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2 mb-2">
+                    123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+                  </code>
+                  <strong className="text-zinc-300">Long-press to copy</strong> this token. You'll use it in the next step to register with cokacdir.
+                </span>
+              )
+            },
+          ]} />
+
+          {/* BotFather conversation simulation */}
+          <p className="text-zinc-400 mb-3 text-sm leading-relaxed">
+            Here's how the full conversation looks:
+          </p>
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-6">
+            <div className="space-y-3 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">You:</span>
+                <code className="text-accent-cyan font-mono">/start</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">I can help you create and manage Telegram bots. ...</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">You:</span>
+                <code className="text-accent-cyan font-mono">/newbot</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">Alright, a new bot. How are we going to call it? Please choose a name for your bot.</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">You:</span>
+                <span className="text-zinc-300">My Cokacdir Bot</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">Good. Now let's choose a username for your bot. It must end in `bot`. Like this, for example: TetrisBot or tetris_bot.</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">You:</span>
+                <span className="text-zinc-300">my_cokacdir_bot</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-20">BotFather:</span>
+                <span className="text-zinc-400">
+                  Done! Congratulations on your new bot. You will find it at t.me/my_cokacdir_bot.<br/>
+                  Use this token to access the HTTP API:<br/>
+                  <code className="text-accent-cyan font-mono bg-bg-elevated px-1.5 py-0.5 rounded">123456789:ABCdefGHIjklMNOpqrsTUVwxyz</code>
+                  <br/>Keep your token secure and store it safely.
+                </span>
+              </div>
+            </div>
+            <div className="mt-3 pt-3 border-t border-zinc-700">
+              <p className="text-zinc-500 text-xs">
+                {'↑'} The <code className="text-accent-cyan font-mono">123456789:ABCdef...</code> part in the last message is the API token. Copy this.
+              </p>
+            </div>
+          </div>
+
+          <TipBox variant="warning">
+            The API token is like a password. Never share it with anyone.
+            If the token is leaked, anyone can control your Bot.
+            If your token has been compromised, send <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">/revoke</code> to BotFather to regenerate it.
+          </TipBox>
+
+          {/* ========== Setup and Start ========== */}
+          <SectionHeading id="telegram-setup" level={3}>Setup and Start</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            The Bot server runs on the computer where cokacdir is installed.
+            Setup differs slightly by platform, so follow the instructions for your operating system.
+          </p>
+
+          {/* Platform-specific guides */}
+          <div className="space-y-4 mb-6">
+            {/* macOS */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
+              <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-green-500/20 text-green-400 text-sm flex items-center justify-center flex-shrink-0">{'🍎'}</span>
+                macOS
+              </h4>
+              <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+                No additional setup required on macOS. Open <strong className="text-zinc-300">Terminal.app</strong> or <strong className="text-zinc-300">iTerm2</strong> and run the commands below.
+              </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono">
+                <div className="text-zinc-500 mb-1"># Register token</div>
+                <div className="text-accent-cyan">cokacdir --ccsetkey YOUR_BOT_TOKEN</div>
+                <div className="text-zinc-500 mt-2 mb-1"># Start server</div>
+                <div className="text-accent-cyan">cokacdir --ccserver</div>
+              </div>
+              <p className="text-zinc-500 text-xs mt-2">
+                macOS path example: <code className="font-mono">/Users/username/Documents</code>
+              </p>
+            </div>
+
+            {/* Linux */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
+              <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-yellow-500/20 text-yellow-400 text-sm flex items-center justify-center flex-shrink-0">{'🐧'}</span>
+                Linux
+              </h4>
+              <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+                No additional setup required on Linux. Works on all distributions including Ubuntu, Debian, Fedora, and Arch.
+                Open your terminal and run the commands below.
+              </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono">
+                <div className="text-zinc-500 mb-1"># Register token</div>
+                <div className="text-accent-cyan">cokacdir --ccsetkey YOUR_BOT_TOKEN</div>
+                <div className="text-zinc-500 mt-2 mb-1"># Start server</div>
+                <div className="text-accent-cyan">cokacdir --ccserver</div>
+              </div>
+              <p className="text-zinc-500 text-xs mt-2">
+                Linux path example: <code className="font-mono">/home/username/projects</code>
+              </p>
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mt-3">
+                <div className="text-zinc-500 mb-1">Running on headless servers</div>
+                <p className="text-zinc-400 leading-relaxed">
+                  The Bot server works on GUI-less servers too. SSH into your server and run the same commands.
+                  To auto-start after reboot, register a <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">systemd</code> service
+                  or add a <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">@reboot</code> entry to <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">crontab</code>.
+                </p>
+              </div>
+            </div>
+
+            {/* Windows */}
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-5">
+              <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <span className="w-7 h-7 rounded-full bg-blue-500/20 text-blue-400 text-sm flex items-center justify-center flex-shrink-0">{'🪟'}</span>
+                Windows (WSL Required)
+              </h4>
+              <p className="text-zinc-400 text-sm mb-3 leading-relaxed">
+                cokacdir is a Unix-based program, so on Windows you need <strong className="text-white">WSL (Windows Subsystem for Linux)</strong>.
+                WSL is an official Windows feature that runs a Linux environment inside Windows.
+              </p>
+
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
+                <div className="text-zinc-400 font-semibold mb-2">If WSL is not installed yet:</div>
+                <p className="text-zinc-400 mb-2 leading-relaxed">
+                  Open <strong className="text-zinc-300">PowerShell</strong> as <strong className="text-zinc-300">Administrator</strong> and run:
+                </p>
+                <code className="block text-accent-cyan font-mono bg-bg-card px-3 py-2 rounded">
+                  wsl --install
+                </code>
+                <p className="text-zinc-400 mt-2 leading-relaxed">
+                  After installation, restart your computer. Ubuntu will be installed automatically
+                  and you'll be prompted to create a username and password.
+                </p>
+              </div>
+
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm mb-3">
+                <div className="text-zinc-400 font-semibold mb-2">Running cokacdir in WSL:</div>
+                <p className="text-zinc-400 mb-2 leading-relaxed">
+                  Open <strong className="text-zinc-300">Ubuntu</strong> (or your installed Linux distro) from the Start menu.
+                  The terminal that opens is a Linux environment. Install cokacdir here and run the Bot server.
+                </p>
+                <div className="font-mono">
+                  <div className="text-zinc-500 mb-1"># Run in WSL terminal</div>
+                  <div className="text-accent-cyan">cokacdir --ccsetkey YOUR_BOT_TOKEN</div>
+                  <div className="text-accent-cyan">cokacdir --ccserver</div>
+                </div>
+              </div>
+
+              <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm">
+                <div className="text-zinc-400 font-semibold mb-2">Accessing Windows files:</div>
+                <p className="text-zinc-400 leading-relaxed">
+                  You can access your Windows files from inside WSL.
+                  The Windows folder <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">C:\Users\username\Documents</code> is accessible
+                  as <code className="text-accent-cyan font-mono bg-bg-card px-1 py-0.5 rounded">/mnt/c/Users/username/Documents</code> in WSL.
+                </p>
+                <code className="block text-zinc-500 font-mono text-xs bg-bg-card px-3 py-2 rounded mt-2">
+                  /start /mnt/c/Users/username/Documents
+                </code>
+              </div>
+            </div>
+          </div>
+
+          <TipBox variant="note">
+            <strong className="text-zinc-300">Claude CLI</strong> must be installed on all platforms for AI features to work.
+            Without Claude CLI, the Bot server will start but AI queries will return errors.
+          </TipBox>
+
+          {/* Background execution */}
+          <h4 className="text-white font-semibold mt-6 mb-3">Running in the Background</h4>
+          <p className="text-zinc-400 mb-4 leading-relaxed text-sm">
+            To keep the Bot server running after closing the terminal, use background execution.
+          </p>
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-4 mb-4">
+            <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
+              <div className="text-zinc-500 mb-1"># Background execution (macOS, Linux, WSL)</div>
+              <div className="text-accent-cyan">nohup cokacdir --ccserver &amp;</div>
+            </div>
+            <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono mb-3">
+              <div className="text-zinc-500 mb-1"># Check if Bot server is running</div>
+              <div className="text-accent-cyan">ps aux | grep ccserver</div>
+            </div>
+            <div className="bg-bg-elevated border border-zinc-700 rounded p-3 text-sm font-mono">
+              <div className="text-zinc-500 mb-1"># Stop the Bot server</div>
+              <div className="text-accent-cyan">pkill -f "cokacdir --ccserver"</div>
+            </div>
+          </div>
+
+          <TipBox>
+            When the server starts, a greeting message is automatically sent to Telegram.
+            On the first run, the Chat ID isn't registered yet — just send any message to the Bot
+            and it will be saved automatically. From the next start, the greeting will be sent.
+          </TipBox>
+
+          {/* ========== Available Commands ========== */}
+          <SectionHeading id="telegram-commands" level={3}>Available Commands</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            Here are all the commands you can use with the Telegram Bot.
+          </p>
+
+          <div className="space-y-3 mb-6">
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/start &lt;path&gt;</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Start an AI session. <code className="text-zinc-300 font-mono bg-bg-elevated px-1 py-0.5 rounded">path</code> is the directory to work in.
+                If a session already exists for that path, it will be restored with the last 5 conversation entries.
+              </p>
+              <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                /start /home/user/project
+              </code>
+            </div>
+
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/clear</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Clear the current AI session. Conversation history is deleted and you can start fresh.
+              </p>
+            </div>
+
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/pwd</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Show the current working directory of the session.
+              </p>
+            </div>
+
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">/down &lt;filepath&gt;</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Download a file from the server to Telegram. Supports absolute paths or relative paths based on the current session directory.
+              </p>
+              <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                /down report.txt
+              </code>
+            </div>
+
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <code className="text-accent-cyan font-mono font-semibold">!&lt;command&gt;</code>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Execute a shell command directly. Uses the current session path as the working directory.
+                Commands that require user input (e.g., <code className="text-zinc-300 font-mono bg-bg-elevated px-1 py-0.5 rounded">read</code>) are automatically terminated.
+              </p>
+              <code className="block text-zinc-500 font-mono text-sm bg-bg-elevated px-3 py-2 rounded mt-2">
+                !ls -la
+              </code>
+            </div>
+
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-accent-cyan font-semibold">File / Photo Upload</span>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Send a file or photo through Telegram and it will be automatically saved to the current session directory.
+                Useful for quickly transferring photos or documents from your smartphone to the server.
+              </p>
+            </div>
+
+            <div className="bg-bg-card border border-zinc-800 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-accent-cyan font-semibold">General Text</span>
+              </div>
+              <p className="text-zinc-400 text-sm leading-relaxed">
+                Any text that isn't a command is sent to AI.
+                AI responses are streamed in real-time.
+              </p>
+            </div>
+          </div>
+
+          {/* ========== Workflow Examples ========== */}
+          <SectionHeading id="telegram-workflow" level={3}>Workflow Examples</SectionHeading>
+          <p className="text-zinc-400 mb-4 leading-relaxed">
+            Let's walk through some practical examples of how to use the Telegram Bot.
+          </p>
+
+          {/* Workflow 1 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">1</span>
+              Exploring Project Files
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">/start /home/user/my-project</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">Session started at /home/user/my-project.</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">!ls -la</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400 font-mono text-xs">drwxr-xr-x 5 user user 4096 ... src/<br/>-rw-r--r-- 1 user user 1234 ... README.md<br/>...</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <span className="text-zinc-300">Explain the structure of this project</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(AI analyzes and explains the directory structure)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Workflow 2 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">2</span>
+              Analyzing Server Logs
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">/start /var/log</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">!tail -20 syslog</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400 font-mono text-xs">(last 20 lines of log output)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <span className="text-zinc-300">Are there any errors in this log?</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(AI analyzes the log and reports errors)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Workflow 3 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">3</span>
+              Transferring Files
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">/start /home/user/documents</code>
+              </div>
+              <p className="text-zinc-500 italic ml-16">Download from server:</p>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">/down report.pdf</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(report.pdf is sent to Telegram)</span>
+              </div>
+              <p className="text-zinc-500 italic ml-16 mt-2">Upload from smartphone to server:</p>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <span className="text-zinc-300">(Send a file/photo via Telegram attachment)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">Saved: /home/user/documents/photo_abc123.jpg (45678 bytes)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Workflow 4 */}
+          <div className="bg-bg-card border border-zinc-800 rounded-lg p-5 mb-6">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-accent-cyan/20 text-accent-cyan text-sm flex items-center justify-center flex-shrink-0">4</span>
+              Git Status and Management
+            </h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">/start /home/user/my-repo</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">!git status</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400 font-mono text-xs">On branch main<br/>Changes not staged for commit:<br/>&nbsp;&nbsp;modified: src/app.rs</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <code className="text-accent-cyan font-mono">!git diff src/app.rs</code>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(diff output showing changes)</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">You:</span>
+                <span className="text-zinc-300">Summarize these changes</span>
+              </div>
+              <div className="flex gap-3">
+                <span className="text-zinc-500 flex-shrink-0 w-12">Bot:</span>
+                <span className="text-zinc-400">(AI analyzes and summarizes the code changes)</span>
+              </div>
+            </div>
+          </div>
+
+          <TipBox>
+            Combining <code className="text-accent-cyan font-mono">!</code> commands with AI questions is powerful.
+            First check the current state with <code className="text-accent-cyan font-mono">!</code> commands, then ask AI for analysis or advice about the results.
+          </TipBox>
+
+          <TipBox variant="warning">
+            <code className="text-accent-cyan font-mono">!</code> commands run directly on the server, so use destructive commands carefully.
+            Commands like <code className="text-zinc-300 font-mono"> rm</code> and <code className="text-zinc-300 font-mono">mv</code> cannot be undone.
+          </TipBox>
+        </>
+      )}
+    </section>
+  )
+}

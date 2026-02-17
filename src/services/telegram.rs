@@ -1,0 +1,980 @@
+use std::collections::HashMap;
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::path::Path;
+use std::fs;
+
+use tokio::sync::Mutex;
+use teloxide::prelude::*;
+use teloxide::types::ParseMode;
+
+use crate::config::Settings;
+use crate::services::claude::{self, StreamMessage};
+use crate::ui::ai_screen::{self, HistoryItem, HistoryType, SessionData};
+
+/// Per-chat session state
+struct ChatSession {
+    session_id: Option<String>,
+    current_path: Option<String>,
+    history: Vec<HistoryItem>,
+}
+
+type SharedState = Arc<Mutex<HashMap<ChatId, ChatSession>>>;
+
+/// Telegram message length limit
+const TELEGRAM_MSG_LIMIT: usize = 4096;
+
+const GREETING_MESSAGE: &str = "\
+<b>cokacdir Bot Server Started.</b>
+
+<b>Available Commands:</b>
+<code>/start &lt;path&gt;</code> - Start AI session (e.g. <code>/start /home/kst</code>)
+<code>/clear</code> - Clear current session
+<code>/pwd</code> - Show current working path
+<code>/down &lt;filepath&gt;</code> - Download file (e.g. <code>/down report.txt</code>)
+<code>!&lt;command&gt;</code> - Run shell command (e.g. <code>!ls -la</code>)
+
+After starting a session, type any text to chat with AI.
+Send a file or photo to upload it to the current session path.
+
+<b>Usage Example:</b>
+1. <code>/start /home/kst/project</code> — Start session at project directory
+2. <code>What files are in this directory?</code> — Ask AI
+3. <code>!git status</code> — Run shell command directly
+4. <code>Summarize the README.md file</code> — Ask AI to analyze files
+5. <code>/clear</code> — Clear session and start fresh";
+
+/// Entry point: start the Telegram bot with long polling
+pub async fn run_bot(token: &str, chat_id: Option<i64>) {
+    let bot = Bot::new(token);
+    let state: SharedState = Arc::new(Mutex::new(HashMap::new()));
+
+    println!("Telegram bot server started. Waiting for messages...");
+
+    // Send greeting message if chat_id is configured
+    if let Some(id) = chat_id {
+        let target = ChatId(id);
+        let _ = bot.send_message(target, GREETING_MESSAGE)
+            .parse_mode(ParseMode::Html)
+            .await;
+    }
+
+    let shared_state = state.clone();
+    teloxide::repl(bot, move |bot: Bot, msg: Message| {
+        let state = shared_state.clone();
+        async move {
+            handle_message(bot, msg, state).await
+        }
+    })
+    .await;
+}
+
+/// Route incoming messages to appropriate handlers
+async fn handle_message(
+    bot: Bot,
+    msg: Message,
+    state: SharedState,
+) -> ResponseResult<()> {
+    let chat_id = msg.chat.id;
+
+    // Auto-save chat_id to settings if not already saved
+    save_chat_id_if_needed(chat_id);
+
+    // Handle file/photo uploads
+    if msg.document().is_some() || msg.photo().is_some() {
+        return handle_file_upload(&bot, chat_id, &msg, &state).await;
+    }
+
+    let Some(text) = msg.text() else {
+        return Ok(());
+    };
+
+    let text = text.to_string();
+
+    if text.starts_with("/start") {
+        handle_start_command(&bot, chat_id, &text, &state).await?;
+    } else if text.starts_with("/clear") {
+        handle_clear_command(&bot, chat_id, &state).await?;
+    } else if text.starts_with("/pwd") {
+        handle_pwd_command(&bot, chat_id, &state).await?;
+    } else if text.starts_with("/down") {
+        handle_down_command(&bot, chat_id, &text, &state).await?;
+    } else if text.starts_with('!') {
+        handle_shell_command(&bot, chat_id, &text, &state).await?;
+    } else {
+        handle_text_message(&bot, chat_id, &text, &state).await?;
+    }
+
+    Ok(())
+}
+
+/// Handle /start <path> command
+async fn handle_start_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    text: &str,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    // Extract path from "/start <path>"
+    let path_str = text.strip_prefix("/start").unwrap_or("").trim();
+
+    if path_str.is_empty() {
+        bot.send_message(chat_id, "Usage: /start <path>\nExample: /start /tmp")
+            .await?;
+        return Ok(());
+    }
+
+    // Validate path exists
+    let path = Path::new(path_str);
+    if !path.exists() || !path.is_dir() {
+        bot.send_message(chat_id, format!("Error: '{}' is not a valid directory.", path_str))
+            .await?;
+        return Ok(());
+    }
+
+    let canonical_path = path.canonicalize()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| path_str.to_string());
+
+    // Try to load existing session for this path
+    let existing = load_existing_session(&canonical_path);
+
+    let mut response_lines = Vec::new();
+
+    {
+        let mut sessions = state.lock().await;
+        let session = sessions.entry(chat_id).or_insert_with(|| ChatSession {
+            session_id: None,
+            current_path: None,
+            history: Vec::new(),
+        });
+
+        if let Some((session_data, _)) = &existing {
+            session.session_id = Some(session_data.session_id.clone());
+            session.current_path = Some(canonical_path.clone());
+            session.history = session_data.history.clone();
+
+            response_lines.push(format!("Session restored at `{}`.", canonical_path));
+            response_lines.push(String::new());
+
+            // Show last 5 conversation items
+            let history_len = session_data.history.len();
+            let start_idx = if history_len > 5 { history_len - 5 } else { 0 };
+            for item in &session_data.history[start_idx..] {
+                let prefix = match item.item_type {
+                    HistoryType::User => "You",
+                    HistoryType::Assistant => "AI",
+                    HistoryType::Error => "Error",
+                    HistoryType::System => "System",
+                    HistoryType::ToolUse => "Tool",
+                    HistoryType::ToolResult => "Result",
+                };
+                // Truncate long items for display
+                let content: String = item.content.chars().take(200).collect();
+                let truncated = if item.content.chars().count() > 200 { "..." } else { "" };
+                response_lines.push(format!("[{}] {}{}", prefix, content, truncated));
+            }
+        } else {
+            session.session_id = None;
+            session.current_path = Some(canonical_path.clone());
+            session.history.clear();
+
+            response_lines.push(format!("Session started at `{}`.", canonical_path));
+        }
+    }
+
+    let response_text = response_lines.join("\n");
+    send_long_message(bot, chat_id, &response_text, None).await?;
+
+    Ok(())
+}
+
+/// Handle /clear command
+async fn handle_clear_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    {
+        let mut sessions = state.lock().await;
+        if let Some(session) = sessions.get_mut(&chat_id) {
+            session.session_id = None;
+            session.history.clear();
+        }
+    }
+
+    bot.send_message(chat_id, "Session cleared.")
+        .await?;
+
+    Ok(())
+}
+
+/// Handle /pwd command - show current session path
+async fn handle_pwd_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    let current_path = {
+        let sessions = state.lock().await;
+        sessions.get(&chat_id).and_then(|s| s.current_path.clone())
+    };
+
+    match current_path {
+        Some(path) => bot.send_message(chat_id, &path).await?,
+        None => bot.send_message(chat_id, "No active session. Use /start <path> first.").await?,
+    };
+
+    Ok(())
+}
+
+/// Handle /down <filepath> - send file to user
+async fn handle_down_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    text: &str,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    let file_path = text.strip_prefix("/down").unwrap_or("").trim();
+
+    if file_path.is_empty() {
+        bot.send_message(chat_id, "Usage: /down <filepath>\nExample: /down /home/kst/file.txt")
+            .await?;
+        return Ok(());
+    }
+
+    // Resolve relative path using current session path
+    let resolved_path = if Path::new(file_path).is_absolute() {
+        file_path.to_string()
+    } else {
+        let current_path = {
+            let sessions = state.lock().await;
+            sessions.get(&chat_id).and_then(|s| s.current_path.clone())
+        };
+        match current_path {
+            Some(base) => format!("{}/{}", base.trim_end_matches('/'), file_path),
+            None => {
+                bot.send_message(chat_id, "No active session. Use absolute path or /start <path> first.")
+                    .await?;
+                return Ok(());
+            }
+        }
+    };
+
+    let path = Path::new(&resolved_path);
+    if !path.exists() {
+        bot.send_message(chat_id, &format!("File not found: {}", resolved_path)).await?;
+        return Ok(());
+    }
+    if !path.is_file() {
+        bot.send_message(chat_id, &format!("Not a file: {}", resolved_path)).await?;
+        return Ok(());
+    }
+
+    bot.send_document(chat_id, teloxide::types::InputFile::file(path))
+        .await?;
+
+    Ok(())
+}
+
+/// Handle file/photo upload - save to current session path
+async fn handle_file_upload(
+    bot: &Bot,
+    chat_id: ChatId,
+    msg: &Message,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    // Get current session path
+    let current_path = {
+        let sessions = state.lock().await;
+        sessions.get(&chat_id).and_then(|s| s.current_path.clone())
+    };
+
+    let Some(save_dir) = current_path else {
+        bot.send_message(chat_id, "No active session. Use /start <path> first.")
+            .await?;
+        return Ok(());
+    };
+
+    // Get file_id and file_name
+    let (file_id, file_name) = if let Some(doc) = msg.document() {
+        let name = doc.file_name.clone().unwrap_or_else(|| "uploaded_file".to_string());
+        (doc.file.id.clone(), name)
+    } else if let Some(photos) = msg.photo() {
+        // Get the largest photo
+        if let Some(photo) = photos.last() {
+            let name = format!("photo_{}.jpg", photo.file.unique_id);
+            (photo.file.id.clone(), name)
+        } else {
+            return Ok(());
+        }
+    } else {
+        return Ok(());
+    };
+
+    // Download file from Telegram via HTTP
+    let file = bot.get_file(&file_id).await?;
+    let url = format!("https://api.telegram.org/file/bot{}/{}", bot.token(), file.path);
+    let buf = match reqwest::get(&url).await {
+        Ok(resp) => match resp.bytes().await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                bot.send_message(chat_id, &format!("Download failed: {}", e)).await?;
+                return Ok(());
+            }
+        },
+        Err(e) => {
+            bot.send_message(chat_id, &format!("Download failed: {}", e)).await?;
+            return Ok(());
+        }
+    };
+
+    // Save to session path
+    let dest = Path::new(&save_dir).join(&file_name);
+    match fs::write(&dest, &buf) {
+        Ok(_) => {
+            let msg_text = format!("Saved: {}\n({} bytes)", dest.display(), buf.len());
+            bot.send_message(chat_id, &msg_text).await?;
+        }
+        Err(e) => {
+            bot.send_message(chat_id, &format!("Failed to save file: {}", e)).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle !command - execute shell command directly
+async fn handle_shell_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    text: &str,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    let cmd_str = text.strip_prefix('!').unwrap_or("").trim();
+
+    if cmd_str.is_empty() {
+        bot.send_message(chat_id, "Usage: !<command>\nExample: !mkdir /home/kst/testcode")
+            .await?;
+        return Ok(());
+    }
+
+    // Get current_path for working directory (optional, default to /)
+    let working_dir = {
+        let sessions = state.lock().await;
+        sessions.get(&chat_id)
+            .and_then(|s| s.current_path.clone())
+            .unwrap_or_else(|| "/".to_string())
+    };
+
+    let cmd_owned = cmd_str.to_string();
+    let working_dir_clone = working_dir.clone();
+
+    // Run shell command in blocking thread with stdin closed and timeout
+    let result = tokio::task::spawn_blocking(move || {
+        let child = std::process::Command::new("bash")
+            .args(["-c", &cmd_owned])
+            .current_dir(&working_dir_clone)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+
+        match child {
+            Ok(child) => child.wait_with_output(),
+            Err(e) => Err(e),
+        }
+    }).await;
+
+    let response = match result {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            let mut parts = Vec::new();
+
+            if !stdout.is_empty() {
+                parts.push(format!("<pre>{}</pre>", html_escape(stdout.trim_end())));
+            }
+            if !stderr.is_empty() {
+                parts.push(format!("stderr:\n<pre>{}</pre>", html_escape(stderr.trim_end())));
+            }
+            if parts.is_empty() {
+                parts.push(format!("(exit code: {})", exit_code));
+            } else if exit_code != 0 {
+                parts.push(format!("(exit code: {})", exit_code));
+            }
+
+            parts.join("\n")
+        }
+        Ok(Err(e)) => format!("Failed to execute: {}", html_escape(&e.to_string())),
+        Err(e) => format!("Task error: {}", html_escape(&e.to_string())),
+    };
+
+    send_long_message(bot, chat_id, &response, Some(ParseMode::Html)).await?;
+
+    Ok(())
+}
+
+/// Handle regular text messages - send to Claude AI
+async fn handle_text_message(
+    bot: &Bot,
+    chat_id: ChatId,
+    user_text: &str,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    // Get session info (drop lock before any await)
+    let session_info = {
+        let sessions = state.lock().await;
+        sessions.get(&chat_id).and_then(|session| {
+            session.current_path.as_ref().map(|_| {
+                (session.session_id.clone(), session.current_path.clone().unwrap_or_default())
+            })
+        })
+    };
+
+    let (session_id, current_path) = match session_info {
+        Some(info) => info,
+        None => {
+            bot.send_message(chat_id, "No active session. Use /start <path> first.")
+                .await?;
+            return Ok(());
+        }
+    };
+
+    // Add user message to history
+    {
+        let mut sessions = state.lock().await;
+        if let Some(session) = sessions.get_mut(&chat_id) {
+            session.history.push(HistoryItem {
+                item_type: HistoryType::User,
+                content: user_text.to_string(),
+            });
+        }
+    }
+
+    // Send placeholder message
+    let placeholder = bot.send_message(chat_id, "...").await?;
+    let placeholder_msg_id = placeholder.id;
+
+    // Sanitize input
+    let sanitized_input = ai_screen::sanitize_user_input(user_text);
+
+    // Pass user input directly without system prompt
+    let context_prompt = sanitized_input;
+
+    // Create channel for streaming
+    let (tx, rx) = mpsc::channel();
+
+    let session_id_clone = session_id.clone();
+    let current_path_clone = current_path.clone();
+
+    // Run Claude in a blocking thread
+    tokio::task::spawn_blocking(move || {
+        let result = claude::execute_command_streaming(
+            &context_prompt,
+            session_id_clone.as_deref(),
+            &current_path_clone,
+            tx.clone(),
+            Some(""),
+        );
+
+        if let Err(e) = result {
+            let _ = tx.send(StreamMessage::Error { message: e });
+        }
+    });
+
+    // Poll for streaming responses and update message
+    let mut full_response = String::new();
+    let mut last_edit_text = String::from("...");
+    let mut done = false;
+    let mut new_session_id: Option<String> = None;
+
+    while !done {
+        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+        // Drain all available messages
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    match msg {
+                        StreamMessage::Init { session_id: sid } => {
+                            new_session_id = Some(sid);
+                        }
+                        StreamMessage::Text { content } => {
+                            full_response.push_str(&content);
+                        }
+                        StreamMessage::ToolUse { name, .. } => {
+                            full_response.push_str(&format!("\n[Tool: {}]\n", name));
+                        }
+                        StreamMessage::ToolResult { content, is_error } => {
+                            if is_error {
+                                full_response.push_str(&format!("\n[Error: {}]\n", truncate_str(&content, 500)));
+                            }
+                            // Skip non-error tool results to keep response clean
+                        }
+                        StreamMessage::TaskNotification { summary, .. } => {
+                            if !summary.is_empty() {
+                                full_response.push_str(&format!("\n[Task: {}]\n", summary));
+                            }
+                        }
+                        StreamMessage::Done { result, session_id: sid } => {
+                            if !result.is_empty() && full_response.is_empty() {
+                                full_response = result;
+                            }
+                            if let Some(s) = sid {
+                                new_session_id = Some(s);
+                            }
+                            done = true;
+                        }
+                        StreamMessage::Error { message } => {
+                            full_response = format!("Error: {}", message);
+                            done = true;
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    done = true;
+                    break;
+                }
+            }
+        }
+
+        // Update placeholder message if content changed
+        let current_text = if full_response.is_empty() {
+            "...".to_string()
+        } else {
+            // Truncate to Telegram limit for the current message
+            truncate_str(&full_response, TELEGRAM_MSG_LIMIT)
+        };
+
+        if current_text != last_edit_text {
+            let _ = bot.edit_message_text(chat_id, placeholder_msg_id, &current_text).await;
+            last_edit_text = current_text;
+        }
+    }
+
+    // Final response
+    if full_response.is_empty() {
+        full_response = "(No response)".to_string();
+    }
+
+    // Convert markdown to Telegram HTML for formatted display
+    let html_response = markdown_to_telegram_html(&full_response);
+
+    // Send final message(s) with HTML formatting
+    if html_response.len() <= TELEGRAM_MSG_LIMIT {
+        let _ = bot.edit_message_text(chat_id, placeholder_msg_id, &html_response)
+            .parse_mode(ParseMode::Html)
+            .await;
+    } else {
+        // Delete placeholder and send split messages
+        let _ = bot.delete_message(chat_id, placeholder_msg_id).await;
+        send_long_message(bot, chat_id, &html_response, Some(ParseMode::Html)).await?;
+    }
+
+    // Update session state
+    {
+        let mut sessions = state.lock().await;
+        if let Some(session) = sessions.get_mut(&chat_id) {
+            if let Some(sid) = new_session_id {
+                session.session_id = Some(sid);
+            }
+            session.history.push(HistoryItem {
+                item_type: HistoryType::Assistant,
+                content: full_response,
+            });
+
+            // Save session to file
+            save_session_to_file(session, &current_path);
+        }
+    }
+
+    Ok(())
+}
+
+/// Load existing session from ai_sessions directory matching the given path
+fn load_existing_session(current_path: &str) -> Option<(SessionData, std::time::SystemTime)> {
+    let sessions_dir = ai_screen::ai_sessions_dir()?;
+
+    if !sessions_dir.exists() {
+        return None;
+    }
+
+    let mut matching_session: Option<(SessionData, std::time::SystemTime)> = None;
+
+    if let Ok(entries) = fs::read_dir(&sessions_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(session_data) = serde_json::from_str::<SessionData>(&content) {
+                        if session_data.current_path == current_path {
+                            if let Ok(metadata) = path.metadata() {
+                                if let Ok(modified) = metadata.modified() {
+                                    match &matching_session {
+                                        None => matching_session = Some((session_data, modified)),
+                                        Some((_, latest_time)) if modified > *latest_time => {
+                                            matching_session = Some((session_data, modified));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    matching_session
+}
+
+/// Save session to file in the ai_sessions directory
+fn save_session_to_file(session: &ChatSession, current_path: &str) {
+    let Some(ref session_id) = session.session_id else {
+        return;
+    };
+
+    if session.history.is_empty() {
+        return;
+    }
+
+    let Some(sessions_dir) = ai_screen::ai_sessions_dir() else {
+        return;
+    };
+
+    if fs::create_dir_all(&sessions_dir).is_err() {
+        return;
+    }
+
+    // Filter out system messages
+    let saveable_history: Vec<HistoryItem> = session.history.iter()
+        .filter(|item| !matches!(item.item_type, HistoryType::System))
+        .cloned()
+        .collect();
+
+    if saveable_history.is_empty() {
+        return;
+    }
+
+    let session_data = SessionData {
+        session_id: session_id.clone(),
+        history: saveable_history,
+        current_path: current_path.to_string(),
+        created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+    };
+
+    let file_path = sessions_dir.join(format!("{}.json", session_id));
+
+    // Security: Verify the path is within sessions directory
+    if let Some(parent) = file_path.parent() {
+        if parent != sessions_dir {
+            return;
+        }
+    }
+
+    if let Ok(json) = serde_json::to_string_pretty(&session_data) {
+        let _ = fs::write(file_path, json);
+    }
+}
+
+/// Find the largest byte index <= `index` that is a valid UTF-8 char boundary
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        s.len()
+    } else {
+        let mut i = index;
+        while !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    }
+}
+
+/// Send a message that may exceed Telegram's 4096 character limit
+/// by splitting it into multiple messages, handling UTF-8 boundaries
+/// and unclosed HTML tags (e.g. <pre>) across split points
+async fn send_long_message(
+    bot: &Bot,
+    chat_id: ChatId,
+    text: &str,
+    parse_mode: Option<ParseMode>,
+) -> ResponseResult<()> {
+    if text.len() <= TELEGRAM_MSG_LIMIT {
+        let mut req = bot.send_message(chat_id, text);
+        if let Some(mode) = parse_mode {
+            req = req.parse_mode(mode);
+        }
+        req.await?;
+        return Ok(());
+    }
+
+    let is_html = parse_mode.is_some();
+    let mut remaining = text;
+    let mut in_pre = false;
+
+    while !remaining.is_empty() {
+        // Reserve space for tags we may need to add (<pre> + </pre> = 11 bytes)
+        let tag_overhead = if is_html && in_pre { 11 } else { 0 };
+        let effective_limit = TELEGRAM_MSG_LIMIT.saturating_sub(tag_overhead);
+
+        if remaining.len() <= effective_limit {
+            let mut chunk = String::new();
+            if is_html && in_pre {
+                chunk.push_str("<pre>");
+            }
+            chunk.push_str(remaining);
+
+            let mut req = bot.send_message(chat_id, &chunk);
+            if let Some(mode) = parse_mode {
+                req = req.parse_mode(mode);
+            }
+            req.await?;
+            break;
+        }
+
+        // Find a safe UTF-8 char boundary, then find a newline before it
+        let safe_end = floor_char_boundary(remaining, effective_limit);
+        let split_at = remaining[..safe_end]
+            .rfind('\n')
+            .unwrap_or(safe_end);
+
+        let (raw_chunk, rest) = remaining.split_at(split_at);
+
+        let mut chunk = String::new();
+        if is_html && in_pre {
+            chunk.push_str("<pre>");
+        }
+        chunk.push_str(raw_chunk);
+
+        // Track unclosed <pre> tags to close/reopen across chunks
+        if is_html {
+            let last_open = raw_chunk.rfind("<pre>");
+            let last_close = raw_chunk.rfind("</pre>");
+            in_pre = match (last_open, last_close) {
+                (Some(o), Some(c)) => o > c,
+                (Some(_), None) => true,
+                (None, Some(_)) => false,
+                (None, None) => in_pre,
+            };
+            if in_pre {
+                chunk.push_str("</pre>");
+            }
+        }
+
+        let mut req = bot.send_message(chat_id, &chunk);
+        if let Some(mode) = parse_mode {
+            req = req.parse_mode(mode);
+        }
+        req.await?;
+
+        // Skip the newline character at the split point
+        remaining = rest.strip_prefix('\n').unwrap_or(rest);
+    }
+
+    Ok(())
+}
+
+/// Escape special HTML characters for Telegram HTML parse mode
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Truncate a string to max_len bytes, cutting at a safe UTF-8 char and line boundary
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+
+    let safe_end = floor_char_boundary(s, max_len);
+    let truncated = &s[..safe_end];
+    if let Some(pos) = truncated.rfind('\n') {
+        truncated[..pos].to_string()
+    } else {
+        truncated.to_string()
+    }
+}
+
+/// Convert standard markdown to Telegram-compatible HTML
+fn markdown_to_telegram_html(md: &str) -> String {
+    let lines: Vec<&str> = md.lines().collect();
+    let mut result = String::new();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+
+        // Fenced code block
+        if trimmed.starts_with("```") {
+            let mut code_lines = Vec::new();
+            i += 1; // skip opening ```
+            while i < lines.len() {
+                if lines[i].trim_start().starts_with("```") {
+                    break;
+                }
+                code_lines.push(lines[i]);
+                i += 1;
+            }
+            let code = code_lines.join("\n");
+            if !code.is_empty() {
+                result.push_str(&format!("<pre>{}</pre>", html_escape(code.trim_end())));
+            }
+            result.push('\n');
+            i += 1; // skip closing ```
+            continue;
+        }
+
+        // Heading (# ~ ######)
+        if let Some(rest) = strip_heading(trimmed) {
+            result.push_str(&format!("<b>{}</b>", convert_inline(&html_escape(rest))));
+            result.push('\n');
+            i += 1;
+            continue;
+        }
+
+        // Unordered list (- or *)
+        if trimmed.starts_with("- ") {
+            result.push_str(&format!("• {}", convert_inline(&html_escape(&trimmed[2..]))));
+            result.push('\n');
+            i += 1;
+            continue;
+        }
+        if trimmed.starts_with("* ") && !trimmed.starts_with("**") {
+            result.push_str(&format!("• {}", convert_inline(&html_escape(&trimmed[2..]))));
+            result.push('\n');
+            i += 1;
+            continue;
+        }
+
+        // Regular line
+        result.push_str(&convert_inline(&html_escape(lines[i])));
+        result.push('\n');
+        i += 1;
+    }
+
+    result.trim_end().to_string()
+}
+
+/// Strip markdown heading prefix (# ~ ######), return remaining text
+fn strip_heading(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start_matches('#');
+    // Must have consumed at least one # and be followed by a space
+    if trimmed.len() < line.len() && trimmed.starts_with(' ') {
+        let hashes = line.len() - trimmed.len();
+        if hashes <= 6 {
+            return Some(trimmed.trim_start());
+        }
+    }
+    None
+}
+
+/// Convert inline markdown elements (bold, italic, code) in already HTML-escaped text
+fn convert_inline(text: &str) -> String {
+    // Process inline code first to protect content from further conversion
+    let mut result = String::new();
+    let mut remaining = text;
+
+    // Split by inline code spans: `...`
+    loop {
+        if let Some(start) = remaining.find('`') {
+            let after_start = &remaining[start + 1..];
+            if let Some(end) = after_start.find('`') {
+                // Found a complete inline code span
+                let before = &remaining[..start];
+                let code_content = &after_start[..end];
+                result.push_str(&convert_bold_italic(before));
+                result.push_str(&format!("<code>{}</code>", code_content));
+                remaining = &after_start[end + 1..];
+                continue;
+            }
+        }
+        // No more inline code spans
+        result.push_str(&convert_bold_italic(remaining));
+        break;
+    }
+
+    result
+}
+
+/// Convert bold (**...**) and italic (*...*) in text
+fn convert_bold_italic(text: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Bold: **...**
+        if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
+            if let Some(end) = find_closing_marker(&chars, i + 2, &['*', '*']) {
+                let inner: String = chars[i + 2..end].iter().collect();
+                result.push_str(&format!("<b>{}</b>", inner));
+                i = end + 2;
+                continue;
+            }
+        }
+        // Italic: *...*
+        if chars[i] == '*' {
+            if let Some(end) = find_closing_single(&chars, i + 1, '*') {
+                let inner: String = chars[i + 1..end].iter().collect();
+                result.push_str(&format!("<i>{}</i>", inner));
+                i = end + 1;
+                continue;
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    result
+}
+
+/// Find closing double marker (e.g., **) starting from pos
+fn find_closing_marker(chars: &[char], start: usize, marker: &[char; 2]) -> Option<usize> {
+    let len = chars.len();
+    let mut i = start;
+    while i + 1 < len {
+        if chars[i] == marker[0] && chars[i + 1] == marker[1] {
+            // Don't match empty content
+            if i > start {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Find closing single marker (e.g., *) starting from pos
+fn find_closing_single(chars: &[char], start: usize, marker: char) -> Option<usize> {
+    let len = chars.len();
+    let mut i = start;
+    while i < len {
+        if chars[i] == marker {
+            // Don't match empty or double marker
+            if i > start && (i + 1 >= len || chars[i + 1] != marker) {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Save chat_id to settings if not already stored
+fn save_chat_id_if_needed(chat_id: ChatId) {
+    let id = chat_id.0;
+    let settings = Settings::load();
+    if settings.telegram_chat_id == Some(id) {
+        return;
+    }
+    let mut settings = settings;
+    settings.telegram_chat_id = Some(id);
+    let _ = settings.save();
+}

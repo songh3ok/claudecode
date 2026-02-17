@@ -47,7 +47,7 @@ use crate::utils::markdown::{is_line_empty, render_markdown, MarkdownTheme};
 
 /// Sanitize user input to prevent prompt injection attacks
 /// Removes or escapes patterns that could be used to override AI instructions
-fn sanitize_user_input(input: &str) -> String {
+pub fn sanitize_user_input(input: &str) -> String {
     let mut sanitized = input.to_string();
 
     // Remove common prompt injection patterns (case-insensitive)
@@ -376,15 +376,15 @@ const MAX_HISTORY_ITEMS: usize = 500;
 
 /// Session data structure for file persistence
 #[derive(Debug, Serialize, Deserialize)]
-struct SessionData {
-    session_id: String,
-    history: Vec<HistoryItem>,
-    current_path: String,
-    created_at: String,
+pub struct SessionData {
+    pub session_id: String,
+    pub history: Vec<HistoryItem>,
+    pub current_path: String,
+    pub created_at: String,
 }
 
 /// Get the AI sessions directory path (~/.cokacdir/ai_sessions)
-fn ai_sessions_dir() -> Option<PathBuf> {
+pub fn ai_sessions_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".cokacdir").join("ai_sessions"))
 }
 
@@ -901,6 +901,7 @@ Keep responses concise and terminal-friendly.",
                 session_id.as_deref(),
                 &current_path,
                 tx.clone(),
+                None,
             );
 
             let elapsed = start_time.elapsed();

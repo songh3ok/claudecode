@@ -14,6 +14,7 @@ import ProcessManager from './sections/ProcessManager'
 import ImageViewer from './sections/ImageViewer'
 import SettingsConfig from './sections/SettingsConfig'
 import RemoteConnections from './sections/RemoteConnections'
+import TelegramBot from './sections/TelegramBot'
 import BookmarksHelp from './sections/BookmarksHelp'
 import KeyboardReference from './sections/KeyboardReference'
 
@@ -36,6 +37,7 @@ export default function TutorialContent() {
       <ImageViewer />
       <SettingsConfig />
       <RemoteConnections />
+      <TelegramBot />
       <BookmarksHelp />
       <KeyboardReference />
     </div>

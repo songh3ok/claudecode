@@ -40,6 +40,8 @@ fn print_help() {
     println!("    --prompt <TEXT>         Send prompt to AI and print rendered response");
     println!("    --design                Enable theme hot-reload (for theme development)");
     println!("    --base64 <TEXT>         Decode base64 and print (internal use)");
+    println!("    --ccsetkey <TOKEN>      Save Telegram bot token to settings");
+    println!("    --ccserver              Start Telegram bot server");
     println!();
     println!("HOMEPAGE: https://cokacdir.cokac.com");
 }
@@ -62,6 +64,37 @@ fn handle_base64(encoded: &str) {
 
 fn print_version() {
     println!("cokacdir {}", VERSION);
+}
+
+fn handle_ccsetkey(token: &str) {
+    config::Settings::ensure_config_exists();
+    let mut settings = config::Settings::load();
+    settings.telegram_bot_token = Some(token.to_string());
+    match settings.save() {
+        Ok(_) => println!("Telegram bot token saved successfully."),
+        Err(e) => eprintln!("Error saving token: {}", e),
+    }
+}
+
+fn handle_ccserver() {
+    config::Settings::ensure_config_exists();
+    let settings = config::Settings::load();
+    let Some(token) = settings.telegram_bot_token else {
+        eprintln!("Error: No Telegram bot token found.");
+        eprintln!("Set it first with: cokacdir --ccsetkey <TOKEN>");
+        return;
+    };
+
+    if token.trim().is_empty() {
+        eprintln!("Error: Telegram bot token is empty.");
+        eprintln!("Set it first with: cokacdir --ccsetkey <TOKEN>");
+        return;
+    }
+
+    println!("Starting Telegram bot server...");
+
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+    rt.block_on(services::telegram::run_bot(&token, settings.telegram_chat_id));
 }
 
 fn handle_prompt(prompt: &str) {
@@ -167,6 +200,19 @@ fn main() -> io::Result<()> {
                     std::process::exit(1);
                 }
                 handle_base64(&args[i + 1]);
+                return Ok(());
+            }
+            "--ccsetkey" => {
+                if i + 1 >= args.len() {
+                    eprintln!("Error: --ccsetkey requires a token argument");
+                    eprintln!("Usage: cokacdir --ccsetkey <TELEGRAM_BOT_TOKEN>");
+                    return Ok(());
+                }
+                handle_ccsetkey(&args[i + 1]);
+                return Ok(());
+            }
+            "--ccserver" => {
+                handle_ccserver();
                 return Ok(());
             }
             "--design" => {

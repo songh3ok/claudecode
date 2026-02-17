@@ -179,6 +179,7 @@ IMPORTANT: Format your responses using Markdown for better readability:
         .env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
         .env("BASH_DEFAULT_TIMEOUT_MS", "86400000")  // 24 hours (no practical timeout)
         .env("BASH_MAX_TIMEOUT_MS", "86400000")      // 24 hours (no practical timeout)
+        .env_remove("CLAUDECODE")  // Allow running from within Claude Code sessions
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -287,11 +288,14 @@ pub fn is_ai_supported() -> bool {
 }
 
 /// Execute a command using Claude CLI with streaming output
+/// If `system_prompt` is None, uses the default file manager system prompt.
+/// If `system_prompt` is Some(""), no system prompt is appended.
 pub fn execute_command_streaming(
     prompt: &str,
     session_id: Option<&str>,
     working_dir: &str,
     sender: Sender<StreamMessage>,
+    system_prompt: Option<&str>,
 ) -> Result<(), String> {
     debug_log("========================================");
     debug_log("=== execute_command_streaming START ===");
@@ -303,14 +307,7 @@ pub fn execute_command_streaming(
     debug_log(&format!("working_dir: {}", working_dir));
     debug_log(&format!("timestamp: {:?}", std::time::SystemTime::now()));
 
-    let mut args = vec![
-        "-p".to_string(),
-        "--dangerously-skip-permissions".to_string(),
-        "--verbose".to_string(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--append-system-prompt".to_string(),
-        r#"You are a terminal file manager assistant. Be concise. Focus on file operations. Respond in the same language as the user.
+    let default_system_prompt = r#"You are a terminal file manager assistant. Be concise. Focus on file operations. Respond in the same language as the user.
 
 SECURITY RULES (MUST FOLLOW):
 - NEVER execute destructive commands like rm -rf, format, mkfs, dd, etc.
@@ -336,8 +333,26 @@ IMPORTANT: Format your responses using Markdown for better readability:
 - Use numbered lists (1. item) for sequential steps
 - Use code blocks (```language) for multi-line code or command examples
 - Use headers (## Title) to organize longer responses
-- Keep formatting minimal and terminal-friendly"#.to_string(),
+- Keep formatting minimal and terminal-friendly"#;
+
+    let mut args = vec![
+        "-p".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+        "--verbose".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
     ];
+
+    // Append system prompt based on parameter
+    let effective_prompt = match system_prompt {
+        None => Some(default_system_prompt),
+        Some("") => None,
+        Some(p) => Some(p),
+    };
+    if let Some(sp) = effective_prompt {
+        args.push("--append-system-prompt".to_string());
+        args.push(sp.to_string());
+    }
 
     // Resume session if available
     if let Some(sid) = session_id {
@@ -376,6 +391,7 @@ IMPORTANT: Format your responses using Markdown for better readability:
         .env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "64000")
         .env("BASH_DEFAULT_TIMEOUT_MS", "86400000")  // 24 hours (no practical timeout)
         .env("BASH_MAX_TIMEOUT_MS", "86400000")      // 24 hours (no practical timeout)
+        .env_remove("CLAUDECODE")  // Allow running from within Claude Code sessions
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

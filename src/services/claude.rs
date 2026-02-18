@@ -94,6 +94,22 @@ pub enum StreamMessage {
     Error { message: String },
 }
 
+/// Token for cooperative cancellation of streaming requests.
+/// Holds a flag and the child process PID so the caller can kill it externally.
+pub struct CancelToken {
+    pub cancelled: std::sync::atomic::AtomicBool,
+    pub child_pid: std::sync::Mutex<Option<u32>>,
+}
+
+impl CancelToken {
+    pub fn new() -> Self {
+        Self {
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+            child_pid: std::sync::Mutex::new(None),
+        }
+    }
+}
+
 /// Cached regex pattern for session ID validation
 fn session_id_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
@@ -310,6 +326,7 @@ pub fn execute_command_streaming(
     sender: Sender<StreamMessage>,
     system_prompt: Option<&str>,
     allowed_tools: Option<&[String]>,
+    cancel_token: Option<std::sync::Arc<CancelToken>>,
 ) -> Result<(), String> {
     debug_log("========================================");
     debug_log("=== execute_command_streaming START ===");
@@ -421,6 +438,11 @@ IMPORTANT: Format your responses using Markdown for better readability:
         })?;
     debug_log(&format!("Claude process spawned successfully in {:?}, pid={:?}", spawn_start.elapsed(), child.id()));
 
+    // Store child PID in cancel token so the caller can kill it externally
+    if let Some(ref token) = cancel_token {
+        *token.child_pid.lock().unwrap() = Some(child.id());
+    }
+
     // Write prompt to stdin
     if let Some(mut stdin) = child.stdin.take() {
         debug_log(&format!("Writing prompt to stdin ({} bytes)...", prompt.len()));
@@ -449,6 +471,16 @@ IMPORTANT: Format your responses using Markdown for better readability:
 
     debug_log("Entering lines loop - will block until first line arrives...");
     for line in reader.lines() {
+        // Check cancel token before processing each line
+        if let Some(ref token) = cancel_token {
+            if token.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                debug_log("Cancel detected — killing child process");
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(());
+            }
+        }
+
         debug_log(&format!("Line {} - read started", line_count + 1));
         let line = match line {
             Ok(l) => {
@@ -548,6 +580,16 @@ IMPORTANT: Format your responses using Markdown for better readability:
     debug_log(&format!("Total lines read: {}", line_count));
     debug_log(&format!("final_result present: {}", final_result.is_some()));
     debug_log(&format!("last_session_id: {:?}", last_session_id));
+
+    // Check cancel token after exiting the loop
+    if let Some(ref token) = cancel_token {
+        if token.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            debug_log("Cancel detected after loop — killing child process");
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(());
+        }
+    }
 
     // Wait for process to finish
     debug_log("Waiting for child process to finish (child.wait())...");

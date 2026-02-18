@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::path::Path;
 use std::fs;
 
@@ -9,7 +10,7 @@ use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use sha2::{Sha256, Digest};
 
-use crate::services::claude::{self, StreamMessage, DEFAULT_ALLOWED_TOOLS};
+use crate::services::claude::{self, CancelToken, StreamMessage, DEFAULT_ALLOWED_TOOLS};
 use crate::ui::ai_screen::{self, HistoryItem, HistoryType, SessionData};
 
 /// Per-chat session state
@@ -40,6 +41,10 @@ impl Default for BotSettings {
 struct SharedData {
     sessions: HashMap<ChatId, ChatSession>,
     settings: BotSettings,
+    /// Per-chat cancel tokens for stopping in-progress AI requests
+    cancel_tokens: HashMap<ChatId, Arc<CancelToken>>,
+    /// Message ID of the "Stopping..." message sent by /stop, so the polling loop can update it
+    stop_message_ids: HashMap<ChatId, teloxide::types::MessageId>,
 }
 
 type SharedState = Arc<Mutex<SharedData>>;
@@ -173,6 +178,8 @@ pub async fn run_bot(token: &str) {
     let state: SharedState = Arc::new(Mutex::new(SharedData {
         sessions: HashMap::new(),
         settings: bot_settings,
+        cancel_tokens: HashMap::new(),
+        stop_message_ids: HashMap::new(),
     }));
 
     println!("  ✓ Bot connected — Listening for messages");
@@ -242,7 +249,21 @@ async fn handle_message(
         }
     }
 
-    if text.starts_with("/help") {
+    // Block all messages except /stop while an AI request is in progress
+    if !text.starts_with("/stop") {
+        let data = state.lock().await;
+        if data.cancel_tokens.contains_key(&chat_id) {
+            drop(data);
+            bot.send_message(chat_id, "AI request in progress. Use /stop to cancel.")
+                .await?;
+            return Ok(());
+        }
+    }
+
+    if text.starts_with("/stop") {
+        println!("  [{timestamp}] ◀ [{user_name}] /stop");
+        handle_stop_command(&bot, chat_id, &state).await?;
+    } else if text.starts_with("/help") {
         println!("  [{timestamp}] ◀ [{user_name}] /help");
         handle_help_command(&bot, chat_id).await?;
     } else if text.starts_with("/start") {
@@ -274,7 +295,6 @@ async fn handle_message(
     } else {
         println!("  [{timestamp}] ◀ [{user_name}] {preview}");
         handle_text_message(&bot, chat_id, &text, &state).await?;
-        println!("  [{timestamp}] ▶ [{user_name}] Response sent");
     }
 
     Ok(())
@@ -294,6 +314,7 @@ Manage server files &amp; chat with Claude AI.
 <code>/start</code> — Start with auto-generated workspace
 <code>/pwd</code> — Show current working directory
 <code>/clear</code> — Clear AI conversation history
+<code>/stop</code> — Stop current AI request
 
 <b>File Transfer</b>
 <code>/down &lt;file&gt;</code> — Download file from server
@@ -476,6 +497,59 @@ async fn handle_pwd_command(
         Some(path) => bot.send_message(chat_id, &path).await?,
         None => bot.send_message(chat_id, "No active session. Use /start <path> first.").await?,
     };
+
+    Ok(())
+}
+
+/// Handle /stop command - cancel in-progress AI request
+async fn handle_stop_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    state: &SharedState,
+) -> ResponseResult<()> {
+    let token = {
+        let data = state.lock().await;
+        data.cancel_tokens.get(&chat_id).cloned()
+    };
+
+    match token {
+        Some(token) => {
+            // Ignore duplicate /stop if already cancelled
+            if token.cancelled.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+
+            // Send immediate feedback to user
+            let stop_msg = bot.send_message(chat_id, "Stopping...").await?;
+
+            // Store the stop message ID so the polling loop can update it later
+            {
+                let mut data = state.lock().await;
+                data.stop_message_ids.insert(chat_id, stop_msg.id);
+            }
+
+            // Set cancellation flag
+            token.cancelled.store(true, Ordering::Relaxed);
+
+            // Kill child process directly to unblock reader.lines()
+            // When the child dies, its stdout pipe closes → reader returns EOF → blocking thread exits
+            if let Ok(guard) = token.child_pid.lock() {
+                if let Some(pid) = *guard {
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                    }
+                }
+            }
+
+            let ts = chrono::Local::now().format("%H:%M:%S");
+            println!("  [{ts}] ■ Cancel signal sent");
+        }
+        None => {
+            bot.send_message(chat_id, "No active request to stop.")
+                .await?;
+        }
+    }
 
     Ok(())
 }
@@ -828,16 +902,9 @@ async fn handle_text_message(
         }
     };
 
-    // Add user message to history
-    {
-        let mut data = state.lock().await;
-        if let Some(session) = data.sessions.get_mut(&chat_id) {
-            session.history.push(HistoryItem {
-                item_type: HistoryType::User,
-                content: user_text.to_string(),
-            });
-        }
-    }
+    // Note: user message is NOT added to history here.
+    // It will be added together with the assistant response in the spawned task,
+    // only on successful completion. On cancel, nothing is recorded.
 
     // Send placeholder message
     let placeholder = bot.send_message(chat_id, "...").await?;
@@ -885,11 +952,19 @@ async fn handle_text_message(
         current_path, chat_id.0, bot.token(), disabled_notice
     );
 
+    // Create cancel token for this request
+    let cancel_token = Arc::new(CancelToken::new());
+    {
+        let mut data = state.lock().await;
+        data.cancel_tokens.insert(chat_id, cancel_token.clone());
+    }
+
     // Create channel for streaming
     let (tx, rx) = mpsc::channel();
 
     let session_id_clone = session_id.clone();
     let current_path_clone = current_path.clone();
+    let cancel_token_clone = cancel_token.clone();
 
     // Run Claude in a blocking thread
     tokio::task::spawn_blocking(move || {
@@ -900,6 +975,7 @@ async fn handle_text_message(
             tx.clone(),
             Some(&system_prompt_owned),
             Some(&allowed_tools),
+            Some(cancel_token_clone),
         );
 
         if let Err(e) = result {
@@ -907,137 +983,243 @@ async fn handle_text_message(
         }
     });
 
-    // Poll for streaming responses and update message
-    let mut full_response = String::new();
-    let mut last_edit_text = String::from("...");
-    let mut done = false;
-    let mut new_session_id: Option<String> = None;
+    // Spawn the polling loop as a separate task so the handler returns immediately.
+    // This allows teloxide's per-chat worker to process subsequent messages (e.g. /stop).
+    let bot_owned = bot.clone();
+    let state_owned = state.clone();
+    let user_text_owned = user_text.to_string();
+    tokio::spawn(async move {
+        const SPINNER: &[&str] = &[
+            "🕐 P",           "🕑 Pr",          "🕒 Pro",
+            "🕓 Proc",        "🕔 Proce",       "🕕 Proces",
+            "🕖 Process",     "🕗 Processi",    "🕘 Processin",
+            "🕙 Processing",  "🕚 Processing.", "🕛 Processing..",
+        ];
+        let mut full_response = String::new();
+        let mut last_edit_text = String::new();
+        let mut done = false;
+        let mut cancelled = false;
+        let mut new_session_id: Option<String> = None;
+        let mut spin_idx: usize = 0;
 
-    while !done {
-        // Send typing action (lasts ~5 seconds, so send periodically)
-        let _ = bot.send_chat_action(chat_id, teloxide::types::ChatAction::Typing).await;
+        while !done {
+            // Check cancel token
+            if cancel_token.cancelled.load(Ordering::Relaxed) {
+                cancelled = true;
+                break;
+            }
 
-        tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+            // Send typing action (lasts ~5 seconds, so send periodically)
+            let _ = bot_owned.send_chat_action(chat_id, teloxide::types::ChatAction::Typing).await;
 
-        // Drain all available messages
-        loop {
-            match rx.try_recv() {
-                Ok(msg) => {
-                    match msg {
-                        StreamMessage::Init { session_id: sid } => {
-                            new_session_id = Some(sid);
-                        }
-                        StreamMessage::Text { content } => {
-                            full_response.push_str(&content);
-                        }
-                        StreamMessage::ToolUse { name, input } => {
-                            let summary = format_tool_input(&name, &input);
-                            let ts = chrono::Local::now().format("%H:%M:%S");
-                            println!("  [{ts}]   ⚙ {name}: {}", truncate_str(&summary, 80));
-                            full_response.push_str(&format!("\n\n⚙️ {}\n", summary));
-                        }
-                        StreamMessage::ToolResult { content, is_error } => {
-                            if is_error {
+            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+            // Check cancel token again after sleep
+            if cancel_token.cancelled.load(Ordering::Relaxed) {
+                cancelled = true;
+                break;
+            }
+
+            // Drain all available messages
+            loop {
+                match rx.try_recv() {
+                    Ok(msg) => {
+                        match msg {
+                            StreamMessage::Init { session_id: sid } => {
+                                new_session_id = Some(sid);
+                            }
+                            StreamMessage::Text { content } => {
+                                full_response.push_str(&content);
+                            }
+                            StreamMessage::ToolUse { name, input } => {
+                                let summary = format_tool_input(&name, &input);
                                 let ts = chrono::Local::now().format("%H:%M:%S");
-                                println!("  [{ts}]   ✗ Error: {}", truncate_str(&content, 80));
-                                let truncated = truncate_str(&content, 500);
-                                if truncated.contains('\n') {
-                                    full_response.push_str(&format!("\n❌\n```\n{}\n```\n", truncated));
-                                } else {
-                                    full_response.push_str(&format!("\n❌ `{}`\n\n", truncated));
+                                println!("  [{ts}]   ⚙ {name}: {}", truncate_str(&summary, 80));
+                                full_response.push_str(&format!("\n\n⚙️ {}\n", summary));
+                            }
+                            StreamMessage::ToolResult { content, is_error } => {
+                                if is_error {
+                                    let ts = chrono::Local::now().format("%H:%M:%S");
+                                    println!("  [{ts}]   ✗ Error: {}", truncate_str(&content, 80));
+                                    let truncated = truncate_str(&content, 500);
+                                    if truncated.contains('\n') {
+                                        full_response.push_str(&format!("\n❌\n```\n{}\n```\n", truncated));
+                                    } else {
+                                        full_response.push_str(&format!("\n❌ `{}`\n\n", truncated));
+                                    }
+                                } else if !content.is_empty() {
+                                    let truncated = truncate_str(&content, 300);
+                                    if truncated.contains('\n') {
+                                        full_response.push_str(&format!("\n```\n{}\n```\n", truncated));
+                                    } else {
+                                        full_response.push_str(&format!("\n✅ `{}`\n\n", truncated));
+                                    }
                                 }
-                            } else if !content.is_empty() {
-                                let truncated = truncate_str(&content, 300);
-                                if truncated.contains('\n') {
-                                    full_response.push_str(&format!("\n```\n{}\n```\n", truncated));
-                                } else {
-                                    full_response.push_str(&format!("\n✅ `{}`\n\n", truncated));
+                            }
+                            StreamMessage::TaskNotification { summary, .. } => {
+                                if !summary.is_empty() {
+                                    full_response.push_str(&format!("\n[Task: {}]\n", summary));
                                 }
                             }
-                        }
-                        StreamMessage::TaskNotification { summary, .. } => {
-                            if !summary.is_empty() {
-                                full_response.push_str(&format!("\n[Task: {}]\n", summary));
+                            StreamMessage::Done { result, session_id: sid } => {
+                                if !result.is_empty() && full_response.is_empty() {
+                                    full_response = result;
+                                }
+                                if let Some(s) = sid {
+                                    new_session_id = Some(s);
+                                }
+                                done = true;
                             }
-                        }
-                        StreamMessage::Done { result, session_id: sid } => {
-                            if !result.is_empty() && full_response.is_empty() {
-                                full_response = result;
+                            StreamMessage::Error { message } => {
+                                full_response = format!("Error: {}", message);
+                                done = true;
                             }
-                            if let Some(s) = sid {
-                                new_session_id = Some(s);
-                            }
-                            done = true;
-                        }
-                        StreamMessage::Error { message } => {
-                            full_response = format!("Error: {}", message);
-                            done = true;
                         }
                     }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        done = true;
+                        break;
+                    }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    done = true;
-                    break;
-                }
+            }
+
+            // Build display text with spinning clock+text indicator appended
+            let indicator = SPINNER[spin_idx % SPINNER.len()];
+            spin_idx += 1;
+
+            let display_text = if full_response.is_empty() {
+                indicator.to_string()
+            } else {
+                let normalized = normalize_empty_lines(&full_response);
+                let truncated = truncate_str(&normalized, TELEGRAM_MSG_LIMIT - 20);
+                format!("{}\n\n{}", truncated, indicator)
+            };
+
+            if display_text != last_edit_text {
+                let html_text = markdown_to_telegram_html(&display_text);
+                let _ = bot_owned.edit_message_text(chat_id, placeholder_msg_id, &html_text)
+                    .parse_mode(ParseMode::Html)
+                    .await;
+                last_edit_text = display_text;
             }
         }
 
-        // Update placeholder message if content changed
-        let current_text = if full_response.is_empty() {
-            "...".to_string()
-        } else {
-            // Normalize empty lines to max 1 consecutive empty line
-            let normalized = normalize_empty_lines(&full_response);
-            // Truncate to Telegram limit for the current message
-            truncate_str(&normalized, TELEGRAM_MSG_LIMIT)
+        // Remove cancel token and take stop message ID (processing is done)
+        let stop_msg_id = {
+            let mut data = state_owned.lock().await;
+            data.cancel_tokens.remove(&chat_id);
+            data.stop_message_ids.remove(&chat_id)
         };
 
-        if current_text != last_edit_text {
-            let html_text = markdown_to_telegram_html(&current_text);
-            let _ = bot.edit_message_text(chat_id, placeholder_msg_id, &html_text)
+        if cancelled {
+            // Ensure child process is killed.
+            // handle_stop_command may have missed the kill if the PID wasn't stored yet
+            // (race condition when /stop arrives before spawn_blocking runs).
+            // By now the blocking thread has most likely started and stored the PID.
+            if let Ok(guard) = cancel_token.child_pid.lock() {
+                if let Some(pid) = *guard {
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                    }
+                }
+            }
+
+            // Build stopped response: show partial content + [Stopped] indicator
+            let stopped_response = if full_response.trim().is_empty() {
+                "[Stopped]".to_string()
+            } else {
+                let normalized = normalize_empty_lines(&full_response);
+                format!("{}\n\n[Stopped]", normalized)
+            };
+
+            // Update placeholder message with partial response instead of deleting
+            let html_stopped = markdown_to_telegram_html(&stopped_response);
+            if html_stopped.len() <= TELEGRAM_MSG_LIMIT {
+                let _ = bot_owned.edit_message_text(chat_id, placeholder_msg_id, &html_stopped)
+                    .parse_mode(ParseMode::Html)
+                    .await;
+            } else {
+                let _ = bot_owned.delete_message(chat_id, placeholder_msg_id).await;
+                let _ = send_long_message(&bot_owned, chat_id, &html_stopped, Some(ParseMode::Html)).await;
+            }
+
+            // Delete the "Stopping..." message (no longer needed)
+            if let Some(msg_id) = stop_msg_id {
+                let _ = bot_owned.delete_message(chat_id, msg_id).await;
+            }
+
+            let ts = chrono::Local::now().format("%H:%M:%S");
+            println!("  [{ts}] ■ Stopped");
+
+            // Record user message + stopped response in history
+            // (Claude's session context already has this interaction)
+            let mut data = state_owned.lock().await;
+            if let Some(session) = data.sessions.get_mut(&chat_id) {
+                if let Some(sid) = new_session_id {
+                    session.session_id = Some(sid);
+                }
+                session.history.push(HistoryItem {
+                    item_type: HistoryType::User,
+                    content: user_text_owned,
+                });
+                session.history.push(HistoryItem {
+                    item_type: HistoryType::Assistant,
+                    content: stopped_response,
+                });
+
+                save_session_to_file(session, &current_path);
+            }
+
+            return;
+        }
+
+        // Final response
+        if full_response.is_empty() {
+            full_response = "(No response)".to_string();
+        }
+
+        let full_response = normalize_empty_lines(&full_response);
+        let html_response = markdown_to_telegram_html(&full_response);
+
+        if html_response.len() <= TELEGRAM_MSG_LIMIT {
+            let _ = bot_owned.edit_message_text(chat_id, placeholder_msg_id, &html_response)
                 .parse_mode(ParseMode::Html)
                 .await;
-            last_edit_text = current_text;
+        } else {
+            let _ = bot_owned.delete_message(chat_id, placeholder_msg_id).await;
+            let _ = send_long_message(&bot_owned, chat_id, &html_response, Some(ParseMode::Html)).await;
         }
-    }
 
-    // Final response
-    if full_response.is_empty() {
-        full_response = "(No response)".to_string();
-    }
+        // Clean up leftover "Stopping..." message if /stop raced with normal completion
+        if let Some(msg_id) = stop_msg_id {
+            let _ = bot_owned.delete_message(chat_id, msg_id).await;
+        }
 
-    // Normalize empty lines and convert markdown to Telegram HTML for formatted display
-    let full_response = normalize_empty_lines(&full_response);
-    let html_response = markdown_to_telegram_html(&full_response);
+        // Update session state: push user message + assistant response together
+        {
+            let mut data = state_owned.lock().await;
+            if let Some(session) = data.sessions.get_mut(&chat_id) {
+                if let Some(sid) = new_session_id {
+                    session.session_id = Some(sid);
+                }
+                session.history.push(HistoryItem {
+                    item_type: HistoryType::User,
+                    content: user_text_owned,
+                });
+                session.history.push(HistoryItem {
+                    item_type: HistoryType::Assistant,
+                    content: full_response,
+                });
 
-    // Send final message(s) with HTML formatting
-    if html_response.len() <= TELEGRAM_MSG_LIMIT {
-        let _ = bot.edit_message_text(chat_id, placeholder_msg_id, &html_response)
-            .parse_mode(ParseMode::Html)
-            .await;
-    } else {
-        // Delete placeholder and send split messages
-        let _ = bot.delete_message(chat_id, placeholder_msg_id).await;
-        send_long_message(bot, chat_id, &html_response, Some(ParseMode::Html)).await?;
-    }
-
-    // Update session state
-    {
-        let mut data = state.lock().await;
-        if let Some(session) = data.sessions.get_mut(&chat_id) {
-            if let Some(sid) = new_session_id {
-                session.session_id = Some(sid);
+                save_session_to_file(session, &current_path);
             }
-            session.history.push(HistoryItem {
-                item_type: HistoryType::Assistant,
-                content: full_response,
-            });
-
-            // Save session to file
-            save_session_to_file(session, &current_path);
         }
-    }
+
+        let ts = chrono::Local::now().format("%H:%M:%S");
+        println!("  [{ts}] ▶ Response sent");
+    });
 
     Ok(())
 }

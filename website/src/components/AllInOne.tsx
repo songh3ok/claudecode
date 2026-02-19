@@ -1,19 +1,21 @@
 import { motion, useInView } from 'framer-motion'
 import { useRef } from 'react'
-
-const replacedTools = [
-  'Finder / Nautilus',
-  'vim / nano',
-  'lazygit',
-  'meld / diff',
-  'htop',
-  'FileZilla',
-  'feh / sxiv',
-]
+import { useLanguage } from './tutorial/LanguageContext'
 
 export default function AllInOne() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, margin: '-100px' })
+  const { t } = useLanguage()
+
+  const replacedTools = [
+    'Finder / Nautilus',
+    'vim / nano',
+    'lazygit',
+    'meld / diff',
+    'htop',
+    'FileZilla',
+    'feh / sxiv',
+  ]
 
   return (
     <section className="py-12 sm:py-24 px-4" ref={ref}>
@@ -27,10 +29,16 @@ export default function AllInOne() {
           className="text-center mb-8 sm:mb-16"
         >
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-            One Tool, <span className="text-accent-cyan text-glow">Zero</span> Context Switching
+            {t(
+              <>One Tool, <span className="text-accent-cyan text-glow">Zero</span> Context Switching</>,
+              <>하나의 도구, <span className="text-accent-cyan text-glow">제로</span> 컨텍스트 스위칭</>
+            )}
           </h2>
           <p className="text-zinc-400 text-sm sm:text-lg max-w-2xl mx-auto">
-            Stop juggling between file manager, editor, git client, diff tool, and terminal.
+            {t(
+              'Stop juggling between file manager, editor, git client, diff tool, and terminal.',
+              '파일 관리자, 에디터, git 클라이언트, diff 도구, 터미널 사이를 왔다 갔다 하지 마세요.'
+            )}
           </p>
         </motion.div>
 
@@ -92,10 +100,19 @@ export default function AllInOne() {
               <div className="absolute inset-0 bg-gradient-to-r from-primary/20 via-accent-cyan/20 to-accent-purple/20 rounded-2xl blur-2xl" />
               <div className="relative bg-bg-card border border-accent-cyan/30 rounded-2xl p-6 sm:p-10 text-center">
                 <div className="text-4xl sm:text-5xl font-extrabold gradient-text mb-3">cokacdir</div>
-                <div className="text-zinc-400 text-sm">All-in-one terminal file manager</div>
+                <div className="text-zinc-400 text-sm">{t('All-in-one terminal file manager', '올인원 터미널 파일 관리자')}</div>
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  {['Files', 'Editor', 'Git', 'Diff', 'Process', 'SSH', 'Encrypt', 'AI'].map((tag) => (
-                    <span key={tag} className="px-2 py-1 bg-accent-cyan/10 border border-accent-cyan/20 rounded text-xs text-accent-cyan">
+                  {[
+                    t('Files', '파일'),
+                    t('Editor', '에디터'),
+                    'Git',
+                    'Diff',
+                    t('Process', '프로세스'),
+                    'SSH',
+                    t('Encrypt', '암호화'),
+                    'AI',
+                  ].map((tag) => (
+                    <span key={String(tag)} className="px-2 py-1 bg-accent-cyan/10 border border-accent-cyan/20 rounded text-xs text-accent-cyan">
                       {tag}
                     </span>
                   ))}

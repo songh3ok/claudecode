@@ -233,7 +233,7 @@ export default function TerminalPreview() {
         </div>
 
         {/* Content area with transitions */}
-        <div className="min-h-[200px] sm:min-h-[240px]">
+        <div className="min-h-[370px] sm:min-h-[240px]">
           <AnimatePresence mode="wait">
             <motion.div
               key={active}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Github, Cloud, Server, Bot, Terminal, Copy, Check, Monitor, Apple, Rocket, MessageCircle } from 'lucide-react'
+import { ArrowLeft, Github, Apple, Bot, Terminal, Copy, Check, Rocket, MessageCircle } from 'lucide-react'
 import { LanguageProvider, useLanguage } from '../tutorial/LanguageContext'
 
 function LanguageToggle() {
@@ -72,7 +72,7 @@ function CopyBlock({ code, label, children }: { code: string; label?: string; ch
 }
 
 function SectionCard({ icon: Icon, title, step, children }: {
-  icon: typeof Server
+  icon: typeof Terminal
   title: string
   step: number
   children: React.ReactNode
@@ -112,7 +112,7 @@ function InlineStep({ n, children }: { n: number; children: React.ReactNode }) {
   )
 }
 
-function EC2PageInner() {
+function MacOSPageInner() {
   const navigate = useNavigate()
   const { t } = useLanguage()
 
@@ -142,8 +142,8 @@ function EC2PageInner() {
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <span className="text-white font-semibold flex items-center gap-2">
-              <Cloud className="w-4 h-4 text-accent-cyan" />
-              <span className="hidden sm:inline">EC2 Setup Guide</span>
+              <Apple className="w-4 h-4 text-accent-cyan" />
+              <span className="hidden sm:inline">macOS Setup Guide</span>
             </span>
           </div>
 
@@ -169,18 +169,18 @@ function EC2PageInner() {
           {/* Page title */}
           <div className="mb-12 text-center">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-cyan/10 border border-accent-cyan/30 text-accent-cyan text-sm font-medium mb-4">
-              <Cloud className="w-4 h-4" />
-              AWS EC2 Sandbox
+              <Apple className="w-4 h-4" />
+              macOS
             </div>
             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white mb-4">
-              {t('Claude Code on EC2', 'EC2에서 Claude Code')}
+              {t('cokacdir on macOS', 'macOS에서 cokacdir')}
               <br />
-              <span className="gradient-text">{t('Sandbox Setup', '샌드박스 셋업')}</span>
+              <span className="gradient-text">{t('Setup Guide', '셋업 가이드')}</span>
             </h1>
             <p className="text-lg text-zinc-400 leading-relaxed max-w-2xl mx-auto">
               {t(
-                'A guide to setting up a cokacdir & Claude Code environment on AWS EC2 and using it anywhere via Telegram bot.',
-                'AWS EC2 위에 cokacdir & Claude Code 환경을 만들고, 텔레그램 봇으로 어디서나 사용하는 가이드입니다.'
+                'Install cokacdir on a macOS with Claude Code and use it anywhere via Telegram bot.',
+                'Claude Code가 설치된 macOS에 cokacdir을 설치하고, 텔레그램 봇으로 어디서나 사용하는 가이드입니다.'
               )}
             </p>
           </div>
@@ -194,21 +194,14 @@ function EC2PageInner() {
           >
             <h3 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
               <Rocket className="w-5 h-5 text-accent-purple" />
-              {t('3 Prerequisites', '준비물 3가지')}
+              {t('2 Prerequisites', '준비물 2가지')}
             </h3>
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-2 gap-3">
               <div className="flex items-center gap-3 p-3 rounded-lg bg-bg-card border border-zinc-800">
-                <Server className="w-5 h-5 text-accent-cyan flex-shrink-0" />
+                <Apple className="w-5 h-5 text-accent-cyan flex-shrink-0" />
                 <div>
-                  <p className="text-white font-medium text-sm">{t('EC2 IP Address', 'EC2 IP 주소')}</p>
-                  <p className="text-zinc-500 text-xs">{t('Public IPv4', '퍼블릭 IPv4')}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-bg-card border border-zinc-800">
-                <Terminal className="w-5 h-5 text-accent-cyan flex-shrink-0" />
-                <div>
-                  <p className="text-white font-medium text-sm">{t('PEM Key File', 'PEM 키 파일')}</p>
-                  <p className="text-zinc-500 text-xs">{t('For SSH access', 'SSH 접속용')}</p>
+                  <p className="text-white font-medium text-sm">{t('macOS with Claude Code', 'Claude Code 설치된 macOS')}</p>
+                  <p className="text-zinc-500 text-xs">{t('Terminal accessible', '터미널 사용 가능')}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-lg bg-bg-card border border-zinc-800">
@@ -221,60 +214,14 @@ function EC2PageInner() {
             </div>
           </motion.div>
 
-          {/* Step 1: EC2 */}
-          <SectionCard icon={Server} title={t('Create EC2 Instance', 'EC2 인스턴스 만들기')} step={1}>
+          {/* Step 1: Install cokacdir */}
+          <SectionCard icon={Terminal} title={t('Install cokacdir', 'cokacdir 설치')} step={1}>
             <p>
-              <a
-                href="https://ap-northeast-2.console.aws.amazon.com/ec2/home#LaunchInstances:"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-accent-cyan hover:underline font-medium"
-              >
-                {t('AWS EC2 Console → Launch Instances', 'AWS EC2 콘솔 → Launch Instances')}
-              </a>
-              {' '}{t('— create a new instance.', '에서 새 인스턴스를 만듭니다.')}
+              {t('Open a terminal and enter the following command.', '터미널을 열고 아래 명령어를 입력합니다.')}
             </p>
-
-            <InlineStep n={1}>
-              {t(
-                <>Set the instance <strong className="text-white">name</strong>.</>,
-                <>인스턴스 <strong className="text-white">이름</strong>을 정합니다.</>
-              )}
-            </InlineStep>
-            <InlineStep n={2}>
-              {t(
-                <>Select <strong className="text-white">Ubuntu</strong> as the OS.</>,
-                <>OS는 <strong className="text-white">Ubuntu</strong>를 선택합니다.</>
-              )}
-            </InlineStep>
-            <InlineStep n={3}>
-              {t(
-                <>Click <strong className="text-white">Create new key pair</strong> and download it as <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">secret.pem</code>.</>,
-                <>키페어에서 <strong className="text-white">새 키 페어 생성</strong>을 눌러 <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">secret.pem</code> 이름으로 다운로드합니다.</>
-              )}
-            </InlineStep>
-            <InlineStep n={4}>
-              {t(
-                <>Set the storage to <strong className="text-white">32 GB</strong>, then click <strong className="text-white">Launch instance</strong>.</>,
-                <>스토리지 구성을 <strong className="text-white">32 GB</strong>로 설정한 뒤, <strong className="text-white">인스턴스 시작</strong> 버튼을 누릅니다.</>
-              )}
-            </InlineStep>
-
-            <div className="my-4 p-4 rounded-lg border border-accent-cyan/20 bg-accent-cyan/5">
-              <p className="text-sm text-zinc-300">
-                {t(
-                  <>Create a <strong className="text-white">credential</strong> folder on your computer and place the <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">secret.pem</code> file inside.</>,
-                  <><code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">secret.pem</code> 파일은 컴퓨터에 <strong className="text-white">credential</strong> 폴더를 만들어 그 안에 넣어 둡니다.</>
-                )}
-              </p>
-            </div>
-
-            <p>
-              {t(
-                <>Go to the <a href="https://ap-northeast-2.console.aws.amazon.com/ec2/home#Instances:" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline font-medium">EC2 instance list</a>, click the instance you just created, and copy the <strong className="text-white">Public IPv4 address</strong> from the details.</>,
-                <><a href="https://ap-northeast-2.console.aws.amazon.com/ec2/home#Instances:" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline font-medium">EC2 인스턴스 목록</a>에서 방금 만든 인스턴스를 클릭하고, 세부정보의 <strong className="text-white">퍼블릭 IPv4 주소</strong>를 복사해 둡니다.</>
-              )}
-            </p>
+            <CopyBlock code={`/bin/bash -c "$(curl -fsSL https://cokacdir.cokac.com/install.sh)"`} label="Terminal">
+{`/bin/bash -c "$(curl -fsSL https://cokacdir.cokac.com/install.sh)"`}
+            </CopyBlock>
           </SectionCard>
 
           {/* Step 2: Telegram */}
@@ -308,54 +255,33 @@ function EC2PageInner() {
             <p className="text-zinc-500 text-sm">{t('Copy this token.', '이 토큰을 복사해 둡니다.')}</p>
           </SectionCard>
 
-          {/* Step 3: Setup command */}
-          <SectionCard icon={Terminal} title={t('Run EC2 Setup Command', 'EC2 셋팅 명령어 실행')} step={3}>
+          {/* Step 3: Register background service */}
+          <SectionCard icon={Apple} title={t('Register Background Service', '백그라운드 서비스 등록')} step={3}>
             <p>
               {t(
-                <>Open a terminal in the <strong className="text-white">credential</strong> folder where <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">secret.pem</code> is located.</>,
-                <><code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">secret.pem</code> 파일이 들어 있는 <strong className="text-white">credential</strong> 폴더에서 터미널을 엽니다.</>
+                <>Register a macOS system service with the Telegram bot token you received. It will <strong className="text-white">start automatically</strong> even after rebooting your computer.</>,
+                <>발급받은 텔레그램 봇 토큰으로 macOS 시스템 서비스를 등록합니다. 컴퓨터를 껐다 켜도 <strong className="text-white">자동으로 구동</strong>됩니다.</>
               )}
             </p>
 
-            {/* macOS */}
-            <div className="mt-6 p-4 rounded-xl border border-zinc-800 bg-bg-card">
-              <div className="flex items-center gap-2 mb-3">
-                <Apple className="w-5 h-5 text-zinc-400" />
-                <h4 className="text-white font-semibold">macOS</h4>
-              </div>
-              <p className="text-zinc-400 text-sm mb-3">
+            <div className="my-4 p-4 rounded-lg border border-yellow-500/20 bg-yellow-500/5">
+              <p className="text-sm text-zinc-300">
                 {t(
-                  <>Right-click the credential folder → <strong className="text-zinc-200">Services</strong> → <strong className="text-zinc-200">New Terminal at Folder</strong></>,
-                  <>credential 폴더를 우클릭 → <strong className="text-zinc-200">Services</strong> → <strong className="text-zinc-200">New Terminal at Folder</strong></>
+                  <>The command below requires <strong className="text-white">Node.js</strong>. If not installed, download and install it from <a href="https://nodejs.org/en/download" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline font-medium">nodejs.org/en/download</a> first.</>,
+                  <>아래 명령어는 <strong className="text-white">Node.js</strong>가 필요합니다. 설치되어 있지 않다면 <a href="https://nodejs.org/ko/download" target="_blank" rel="noopener noreferrer" className="text-accent-cyan hover:underline font-medium">nodejs.org/ko/download</a>에서 먼저 다운로드하여 설치하세요.</>
                 )}
               </p>
-              <CopyBlock code={`export PEM=secret.pem\nexport IP=0.0.0.0\nexport TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz\nexport URL=https://raw.githubusercontent.com/kstost/service-setup-cokacdir/refs/heads/main/basic_setup_ec2.sh\nssh -t -i "$PEM" ubuntu@$IP "bash -ic \\"source <(curl -sL $URL) > /dev/null 2>&1 && npx -y service-setup-cokacdir $TOKEN && claude\\""`} label="macOS Terminal">
-{`export PEM=`}<Hl>secret.pem</Hl>{`\nexport IP=`}<Hl>0.0.0.0</Hl>{`\nexport TOKEN=`}<Hl>123456789:ABCdefGHIjklMNOpqrsTUVwxyz</Hl>{`\nexport URL=https://raw.githubusercontent.com/kstost/service-setup-cokacdir/refs/heads/main/basic_setup_ec2.sh\nssh -t -i "$PEM" ubuntu@$IP "bash -ic \\"source <(curl -sL $URL) > /dev/null 2>&1 && npx -y service-setup-cokacdir $TOKEN && claude\\""`}
-              </CopyBlock>
             </div>
 
-            {/* Windows */}
-            <div className="mt-4 p-4 rounded-xl border border-zinc-800 bg-bg-card">
-              <div className="flex items-center gap-2 mb-3">
-                <Monitor className="w-5 h-5 text-zinc-400" />
-                <h4 className="text-white font-semibold">Windows</h4>
-              </div>
-              <p className="text-zinc-400 text-sm mb-3">
-                {t(
-                  <>Right-click the credential folder → <strong className="text-zinc-200">Open in Terminal</strong></>,
-                  <>credential 폴더를 우클릭 → <strong className="text-zinc-200">터미널에서 열기</strong></>
-                )}
-              </p>
-              <CopyBlock code={`$PEM = "secret.pem"; \`\n$IP = "0.0.0.0"; \`\n$TOKEN = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"; \`\n$URL = "https://raw.githubusercontent.com/kstost/service-setup-cokacdir/refs/heads/main/basic_setup_ec2.sh"; \`\nssh -t -i $PEM ubuntu@$IP "bash -ic 'source <(curl -sL $URL) > /dev/null 2>&1 && npx -y service-setup-cokacdir $TOKEN && claude'"`} label="PowerShell">
-{`$PEM = "`}<Hl>secret.pem</Hl>{`"; \`\n$IP = "`}<Hl>0.0.0.0</Hl>{`"; \`\n$TOKEN = "`}<Hl>123456789:ABCdefGHIjklMNOpqrsTUVwxyz</Hl>{`"; \`\n$URL = "https://raw.githubusercontent.com/kstost/service-setup-cokacdir/refs/heads/main/basic_setup_ec2.sh"; \`\nssh -t -i $PEM ubuntu@$IP "bash -ic 'source <(curl -sL $URL) > /dev/null 2>&1 && npx -y service-setup-cokacdir $TOKEN && claude'"`}
-              </CopyBlock>
-            </div>
+            <CopyBlock code={`npx -y service-setup-cokacdir <텔레그램봇토큰>`} label="Terminal">
+{`npx -y service-setup-cokacdir `}<Hl>{'<텔레그램봇토큰>'}</Hl>
+            </CopyBlock>
 
             <div className="mt-4 p-4 rounded-lg border border-accent-cyan/20 bg-accent-cyan/5">
               <p className="text-sm text-zinc-300">
                 {t(
-                  'Replace the PEM file name, EC2 IP address, and Telegram bot token with your own and run the command. After a moment, the Claude Code setup process will appear — complete the authentication and you\'re ready.',
-                  '명령어 안의 PEM 파일 이름, EC2 IP 주소, 텔레그램 봇 토큰을 본인 것으로 바꿔 넣고 실행하세요. 잠시 기다리면 Claude Code 설정 과정이 나오고, 인증을 마치면 준비 완료입니다.'
+                  <>Replace <Hl>{'<텔레그램봇토큰>'}</Hl> with the actual token issued by BotFather and run the command.</>,
+                  <><Hl>{'<텔레그램봇토큰>'}</Hl> 부분을 BotFather에서 발급받은 실제 토큰으로 바꿔 넣고 실행하세요.</>
                 )}
               </p>
             </div>
@@ -364,7 +290,7 @@ function EC2PageInner() {
           {/* Divider */}
           <div className="flex items-center gap-4 my-12">
             <div className="flex-1 h-px bg-zinc-800" />
-            <span className="text-zinc-500 text-sm font-medium">{t('Setup Complete', '설치 완료')}</span>
+            <span className="text-zinc-500 text-sm font-medium">{t('All Done', '모든 설정 끝')}</span>
             <div className="flex-1 h-px bg-zinc-800" />
           </div>
 
@@ -391,8 +317,8 @@ function EC2PageInner() {
               </InlineStep>
               <InlineStep n={2}>
                 {t(
-                  <>Type <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">/start /home/ubuntu</code> to launch Claude as if you're in the <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-zinc-300 text-sm">/home/ubuntu</code> directory on EC2.</>,
-                  <><code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">/start /home/ubuntu</code> 를 입력하면 EC2 컴퓨터 상 <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-zinc-300 text-sm">/home/ubuntu</code> 폴더에서 Claude를 실행한 것과 같은 상태가 됩니다.</>
+                  <>Type <code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">/start</code> to launch Claude.</>,
+                  <><code className="px-1.5 py-0.5 bg-bg-elevated rounded text-accent-cyan text-sm">/start</code> 를 입력하면 Claude를 실행한 것과 같은 상태가 됩니다.</>
                 )}
               </InlineStep>
               <InlineStep n={3}>
@@ -448,10 +374,10 @@ function EC2PageInner() {
   )
 }
 
-export default function EC2Page() {
+export default function MacOSPage() {
   return (
     <LanguageProvider>
-      <EC2PageInner />
+      <MacOSPageInner />
     </LanguageProvider>
   )
 }

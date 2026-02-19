@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import { Columns, Search, Image, Bookmark, Wifi, Eye, Settings2, Activity, ArrowLeftRight, GitBranch, GitCommit, Keyboard, Lock } from 'lucide-react'
+import { useLanguage } from './tutorial/LanguageContext'
 
 interface SubFeature {
   icon: typeof Columns
@@ -15,50 +16,61 @@ interface Pillar {
   subFeatures: SubFeature[]
 }
 
-const pillars: Pillar[] = [
-  {
-    title: 'Navigate & Explore',
-    description: 'Effortlessly browse, search, and organize files across local and remote systems.',
-    tint: 'from-accent-cyan/5 to-transparent',
-    borderColor: 'border-accent-cyan/20 hover:border-accent-cyan/40',
-    iconBg: 'bg-accent-cyan/10 text-accent-cyan',
-    subFeatures: [
-      { icon: Columns, label: 'Multi-panel layout' },
-      { icon: Search, label: 'File search with fuzzy matching' },
-      { icon: Image, label: 'Terminal image viewer' },
-      { icon: Bookmark, label: 'Directory bookmarks' },
-      { icon: Wifi, label: 'Remote SSH / SFTP' },
-    ],
-  },
-  {
-    title: 'Edit & Create',
-    description: 'Built-in tools to view, edit, and manage — no external apps needed.',
-    tint: 'from-accent-purple/5 to-transparent',
-    borderColor: 'border-accent-purple/20 hover:border-accent-purple/40',
-    iconBg: 'bg-accent-purple/10 text-accent-purple',
-    subFeatures: [
-      { icon: Eye, label: 'Viewer & editor (20+ languages)' },
-      { icon: Keyboard, label: 'Customizable keybindings' },
-      { icon: Settings2, label: 'Custom file handlers' },
-      { icon: Activity, label: 'Process manager' },
-      { icon: Lock, label: 'AES-256 file encryption' },
-    ],
-  },
-  {
-    title: 'Compare & Version',
-    description: 'Powerful diffing and git integration for seamless version control.',
-    tint: 'from-accent-green/5 to-transparent',
-    borderColor: 'border-accent-green/20 hover:border-accent-green/40',
-    iconBg: 'bg-accent-green/10 text-accent-green',
-    subFeatures: [
-      { icon: ArrowLeftRight, label: 'Diff compare (folder & file)' },
-      { icon: GitBranch, label: 'Git integration (commit, log, branch)' },
-      { icon: GitCommit, label: 'Git commit diff' },
-    ],
-  },
-]
-
 export default function Features() {
+  const { t } = useLanguage()
+
+  const pillars: Pillar[] = [
+    {
+      title: t('Navigate & Explore', '탐색 & 탐험'),
+      description: t(
+        'Effortlessly browse, search, and organize files across local and remote systems.',
+        '로컬과 원격 시스템의 파일을 손쉽게 탐색, 검색, 정리하세요.'
+      ),
+      tint: 'from-accent-cyan/5 to-transparent',
+      borderColor: 'border-accent-cyan/20 hover:border-accent-cyan/40',
+      iconBg: 'bg-accent-cyan/10 text-accent-cyan',
+      subFeatures: [
+        { icon: Columns, label: t('Multi-panel layout', '멀티 패널 레이아웃') },
+        { icon: Search, label: t('File search with fuzzy matching', '퍼지 매칭 파일 검색') },
+        { icon: Image, label: t('Terminal image viewer', '터미널 이미지 뷰어') },
+        { icon: Bookmark, label: t('Directory bookmarks', '디렉토리 북마크') },
+        { icon: Wifi, label: t('Remote SSH / SFTP', '원격 SSH / SFTP') },
+      ],
+    },
+    {
+      title: t('Edit & Create', '편집 & 생성'),
+      description: t(
+        'Built-in tools to view, edit, and manage — no external apps needed.',
+        '보기, 편집, 관리를 위한 내장 도구 — 외부 앱이 필요 없습니다.'
+      ),
+      tint: 'from-accent-purple/5 to-transparent',
+      borderColor: 'border-accent-purple/20 hover:border-accent-purple/40',
+      iconBg: 'bg-accent-purple/10 text-accent-purple',
+      subFeatures: [
+        { icon: Eye, label: t('Viewer & editor (20+ languages)', '뷰어 & 에디터 (20+ 언어)') },
+        { icon: Keyboard, label: t('Customizable keybindings', '커스터마이징 가능한 키 바인딩') },
+        { icon: Settings2, label: t('Custom file handlers', '커스텀 파일 핸들러') },
+        { icon: Activity, label: t('Process manager', '프로세스 매니저') },
+        { icon: Lock, label: t('AES-256 file encryption', 'AES-256 파일 암호화') },
+      ],
+    },
+    {
+      title: t('Compare & Version', '비교 & 버전 관리'),
+      description: t(
+        'Powerful diffing and git integration for seamless version control.',
+        '강력한 diff 비교와 git 통합으로 원활한 버전 관리.'
+      ),
+      tint: 'from-accent-green/5 to-transparent',
+      borderColor: 'border-accent-green/20 hover:border-accent-green/40',
+      iconBg: 'bg-accent-green/10 text-accent-green',
+      subFeatures: [
+        { icon: ArrowLeftRight, label: t('Diff compare (folder & file)', 'Diff 비교 (폴더 & 파일)') },
+        { icon: GitBranch, label: t('Git integration (commit, log, branch)', 'Git 통합 (커밋, 로그, 브랜치)') },
+        { icon: GitCommit, label: t('Git commit diff', 'Git 커밋 diff') },
+      ],
+    },
+  ]
+
   return (
     <section className="py-12 sm:py-24 px-4" id="features">
       <div className="max-w-6xl mx-auto">
@@ -71,10 +83,16 @@ export default function Features() {
           className="text-center mb-8 sm:mb-16"
         >
           <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-            <span className="gradient-text">Powerful Features</span>
+            {t(
+              <>Plus, a <span className="gradient-text">Powerful File Manager</span></>,
+              <>게다가, <span className="gradient-text">강력한 파일 관리자</span>까지</>
+            )}
           </h2>
           <p className="text-zinc-400 text-sm sm:text-lg max-w-2xl mx-auto">
-            Everything you need in a terminal file manager, and more.
+            {t(
+              'cokacdir is also a full-featured terminal file manager. Navigate, edit, and version-control with ease.',
+              'cokacdir는 본격적인 터미널 파일 관리자이기도 합니다. 탐색, 편집, 버전 관리를 손쉽게.'
+            )}
           </p>
         </motion.div>
 
@@ -132,6 +150,8 @@ export default function Features() {
 
 // Mini visual illustrations for each pillar
 function PillarVisual({ index }: { index: number }) {
+  const { t } = useLanguage()
+
   if (index === 0) {
     // Navigate: multi-panel mockup
     return (
@@ -156,7 +176,7 @@ function PillarVisual({ index }: { index: number }) {
             </div>
           </div>
         </div>
-        <div className="text-center text-zinc-600 text-[10px]">4d 12f 2.4GB | Tab to switch</div>
+        <div className="text-center text-zinc-600 text-[10px]">{t('4d 12f 2.4GB | Tab to switch', '4d 12f 2.4GB | Tab으로 전환')}</div>
       </div>
     )
   }
@@ -177,7 +197,7 @@ function PillarVisual({ index }: { index: number }) {
             <div><span className="text-zinc-600">4</span> {'}'}</div>
           </div>
         </div>
-        <div className="text-center text-zinc-600 text-[10px]">Syntax highlighting for 20+ languages</div>
+        <div className="text-center text-zinc-600 text-[10px]">{t('Syntax highlighting for 20+ languages', '20+ 언어 구문 강조')}</div>
       </div>
     )
   }
@@ -204,7 +224,7 @@ function PillarVisual({ index }: { index: number }) {
           </div>
         </div>
       </div>
-      <div className="text-center text-zinc-600 text-[10px]">Side-by-side with inline highlights</div>
+      <div className="text-center text-zinc-600 text-[10px]">{t('Side-by-side with inline highlights', '인라인 하이라이트와 나란히 비교')}</div>
     </div>
   )
 }

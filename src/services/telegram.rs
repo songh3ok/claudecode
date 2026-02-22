@@ -550,6 +550,7 @@ AI can read, edit, and run commands in your session.
 <code>/allowedtools</code> — Show currently allowed tools
 <code>/allowed +name</code> — Add tool (e.g. <code>/allowed +Bash</code>)
 <code>/allowed -name</code> — Remove tool
+<code>/allowed +a -b +c</code> — Multiple at once
 
 <b>Group Chat</b>
 <code>;</code><i>message</i> — Send message to AI
@@ -1090,6 +1091,7 @@ async fn handle_allowedtools_command(
 /// Handle /allowed command - add/remove tools
 /// Usage: /allowed +toolname  (add)
 ///        /allowed -toolname  (remove)
+///        /allowed +tool1 -tool2 +tool3  (multiple)
 async fn handle_allowed_command(
     bot: &Bot,
     chat_id: ChatId,
@@ -1101,7 +1103,7 @@ async fn handle_allowed_command(
 
     if arg.is_empty() {
         shared_rate_limit_wait(state, chat_id).await;
-        bot.send_message(chat_id, "Usage:\n/allowed +toolname — Add a tool\n/allowed -toolname — Remove a tool\n/allowedtools — Show current list")
+        bot.send_message(chat_id, "Usage:\n/allowed +toolname — Add a tool\n/allowed -toolname — Remove a tool\n/allowed +tool1 -tool2 — Multiple at once\n/allowedtools — Show current list")
             .await?;
         return Ok(());
     }
@@ -1112,25 +1114,28 @@ async fn handle_allowed_command(
         return handle_allowedtools_command(bot, chat_id, state).await;
     }
 
-    let (op, raw_name) = if let Some(name) = arg.strip_prefix('+') {
-        ('+', name.trim())
-    } else if let Some(name) = arg.strip_prefix('-') {
-        ('-', name.trim())
-    } else {
-        shared_rate_limit_wait(state, chat_id).await;
-        bot.send_message(chat_id, "Use +toolname to add or -toolname to remove.\nExample: /allowed +Bash")
-            .await?;
-        return Ok(());
-    };
+    // Parse multiple +name / -name tokens
+    let mut operations: Vec<(char, String)> = Vec::new();
+    for token_str in arg.split_whitespace() {
+        if let Some(name) = token_str.strip_prefix('+') {
+            let name = name.trim();
+            if !name.is_empty() {
+                operations.push(('+', normalize_tool_name(name)));
+            }
+        } else if let Some(name) = token_str.strip_prefix('-') {
+            let name = name.trim();
+            if !name.is_empty() {
+                operations.push(('-', normalize_tool_name(name)));
+            }
+        }
+    }
 
-    if raw_name.is_empty() {
+    if operations.is_empty() {
         shared_rate_limit_wait(state, chat_id).await;
-        bot.send_message(chat_id, "Tool name cannot be empty.")
+        bot.send_message(chat_id, "Use +toolname to add or -toolname to remove.\nExample: /allowed +Bash -Edit")
             .await?;
         return Ok(());
     }
-
-    let tool_name = normalize_tool_name(raw_name);
 
     let response_msg = {
         let mut data = state.lock().await;
@@ -1141,28 +1146,36 @@ async fn handle_allowed_command(
             data.settings.allowed_tools.insert(chat_key.clone(), defaults);
         }
         let tools = data.settings.allowed_tools.get_mut(&chat_key).unwrap();
-        match op {
-            '+' => {
-                if tools.iter().any(|t| t == &tool_name) {
-                    format!("<code>{}</code> is already in the list.", html_escape(&tool_name))
-                } else {
-                    tools.push(tool_name.clone());
-                    save_bot_settings(token, &data.settings);
-                    format!("✅ Added <code>{}</code>", html_escape(&tool_name))
+        let mut results: Vec<String> = Vec::new();
+        let mut changed = false;
+        for (op, tool_name) in &operations {
+            match op {
+                '+' => {
+                    if tools.iter().any(|t| t == tool_name) {
+                        results.push(format!("<code>{}</code> already in list", html_escape(tool_name)));
+                    } else {
+                        tools.push(tool_name.clone());
+                        changed = true;
+                        results.push(format!("✅ <code>{}</code>", html_escape(tool_name)));
+                    }
                 }
-            }
-            '-' => {
-                let before_len = tools.len();
-                tools.retain(|t| t != &tool_name);
-                if tools.len() < before_len {
-                    save_bot_settings(token, &data.settings);
-                    format!("❌ Removed <code>{}</code>", html_escape(&tool_name))
-                } else {
-                    format!("<code>{}</code> is not in the list.", html_escape(&tool_name))
+                '-' => {
+                    let before_len = tools.len();
+                    tools.retain(|t| t != tool_name);
+                    if tools.len() < before_len {
+                        changed = true;
+                        results.push(format!("❌ <code>{}</code>", html_escape(tool_name)));
+                    } else {
+                        results.push(format!("<code>{}</code> not in list", html_escape(tool_name)));
+                    }
                 }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
+        if changed {
+            save_bot_settings(token, &data.settings);
+        }
+        results.join("\n")
     };
 
     shared_rate_limit_wait(state, chat_id).await;
@@ -1325,7 +1338,19 @@ async fn handle_text_message(
          The user cannot see your tool calls, so narrate your progress so they know what is happening.\n\n\
          IMPORTANT: The user is on Telegram and CANNOT interact with any interactive prompts, dialogs, or confirmation requests. \
          All tools that require user interaction (such as AskUserQuestion, EnterPlanMode, ExitPlanMode) will NOT work. \
-         Never use tools that expect user interaction. If you need clarification, just ask in plain text.{}",
+         Never use tools that expect user interaction. If you need clarification, just ask in plain text.\n\n\
+         MCP TOOLS WORKFLOW:\n\
+         Step 1: Check if required MCP tools are registered:\n\
+           cokacdir --ismcptool \"mcp__SERVER1__TOOL1\" \"mcp__SERVER2__TOOL2\" ...\n\
+           Output: \"toolname: registered\" or \"toolname: not registered\" for each tool.\n\
+         Step 2: If ALL tools show \"registered\", proceed to use them directly.\n\
+         Step 3: If ANY tool shows \"not registered\", register ALL missing tools in a single command:\n\
+           cokacdir --addmcptool \"mcp__SERVER1__TOOL1\" \"mcp__SERVER2__TOOL2\" ...\n\
+           Then DO NOT call any MCP tool in this turn. Instead, reply to the user that the tools were not registered \
+         and have now been added. The user will send a follow-up message, and you can use the MCP tools in the next turn.\n\
+         CRITICAL RULES:\n\
+         1. NEVER run multiple --addmcptool commands in parallel to avoid race conditions.\n\
+         2. NEVER call MCP tools in the same turn as --addmcptool. The permission is not applied until the next turn.{}",
         current_path, chat_id.0, token_hash(bot.token()), disabled_notice
     );
 
@@ -1356,7 +1381,7 @@ async fn handle_text_message(
         );
 
         if let Err(e) = result {
-            let _ = tx.send(StreamMessage::Error { message: e });
+            let _ = tx.send(StreamMessage::Error { message: e, stdout: String::new(), stderr: String::new(), exit_code: None });
         }
     });
 
@@ -1445,8 +1470,17 @@ async fn handle_text_message(
                                 }
                                 done = true;
                             }
-                            StreamMessage::Error { message } => {
-                                full_response = format!("Error: {}", message);
+                            StreamMessage::Error { message, stdout, stderr, exit_code } => {
+                                let stdout_display = if stdout.is_empty() { "(empty)".to_string() } else { stdout };
+                                let stderr_display = if stderr.is_empty() { "(empty)".to_string() } else { stderr };
+                                let code_display = match exit_code {
+                                    Some(c) => c.to_string(),
+                                    None => "(unknown)".to_string(),
+                                };
+                                full_response = format!(
+                                    "Error: {}\n```\nexit code: {}\n\n[stdout]\n{}\n\n[stderr]\n{}\n```",
+                                    message, code_display, stdout_display, stderr_display
+                                );
                                 done = true;
                             }
                         }

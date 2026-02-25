@@ -1357,15 +1357,30 @@ async fn handle_clear_command(
         path
     };
 
-    let mut msg = String::from("Session cleared.");
+    // Delete session file from disk so session_id is completely forgotten
     if let Some(ref path) = current_path {
-        msg.push_str(&format!("\nCurrent path: `{}`", path));
-        if let Some(folder_name) = std::path::Path::new(path).file_name().and_then(|n| n.to_str()) {
-            if is_workspace_id(folder_name) {
-                msg.push_str(&format!("\nUse /{} to resume this session.", folder_name));
+        if let Some(sessions_dir) = crate::ui::ai_screen::ai_sessions_dir() {
+            if let Ok(entries) = fs::read_dir(&sessions_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let file_path = entry.path();
+                    if file_path.extension().map(|e| e == "json").unwrap_or(false) {
+                        if let Ok(content) = fs::read_to_string(&file_path) {
+                            if let Ok(session_data) = serde_json::from_str::<SessionData>(&content) {
+                                if session_data.current_path == *path {
+                                    let _ = fs::remove_file(&file_path);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+
+    let msg = match current_path {
+        Some(ref path) => format!("Session cleared.\n`{}`", path),
+        None => "Session cleared.".to_string(),
+    };
 
     shared_rate_limit_wait(state, chat_id).await;
     tg!("send_message", bot.send_message(chat_id, msg)

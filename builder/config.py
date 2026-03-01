@@ -18,7 +18,7 @@ class BuildConfig:
     # Paths (relative to project root)
     builder_dir: Path = field(default_factory=lambda: Path("builder"))
     tools_dir: Path = field(default_factory=lambda: Path("builder/tools"))
-    dist_dir: Path = field(default_factory=lambda: Path("dist"))
+    dist_dir: Path = field(default_factory=lambda: Path("dist_beta"))
 
     # Build settings
     release: bool = True

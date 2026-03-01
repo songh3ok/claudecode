@@ -3477,7 +3477,8 @@ fn detect_cokacdir_command(name: &str, input: &str) -> Option<String> {
     };
     // Support both backslash and forward-slash paths for basename extraction
     let basename = first_token.rsplit(['/', '\\']).next().unwrap_or("");
-    if basename != "cokacdir" && basename != "cokacdir.exe" {
+    let expected_basename = crate::bin_path().rsplit(['/', '\\']).next().unwrap_or("");
+    if basename != expected_basename {
         return None;
     }
     // Extract the first --xxx flag after the executable name

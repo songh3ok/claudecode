@@ -564,8 +564,25 @@ fn build_system_prompt(role: &str, current_path: &str, chat_id: i64, bot_key: &s
     )
 }
 
+/// Detect the full path of powershell.exe on Windows (cached).
+/// Runs `Where.exe powershell.exe` once and caches the first match.
+fn detect_powershell_path() -> Option<&'static str> {
+    static PS_PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    PS_PATH.get_or_init(|| {
+        let output = std::process::Command::new("Where.exe")
+            .arg("powershell.exe")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.lines().next().map(|s| s.trim().to_string())
+    }).as_deref()
+}
+
 /// Returns additional system prompt instructions specific to Codex models.
-/// Includes apply_patch guidance (always) and Windows Git Bash notice (conditional).
+/// Includes apply_patch guidance (always) and Windows shell execution notice (conditional).
 fn codex_extra_instructions() -> String {
     let mut extra = String::from(
         "\n\n\
@@ -581,28 +598,37 @@ fn codex_extra_instructions() -> String {
     );
 
     if cfg!(target_os = "windows") {
-        let paths = [
-            r"C:\Program Files\Git\bin\bash.exe",
-            r"C:\Program Files (x86)\Git\bin\bash.exe",
-        ];
-        if let Some(bash_path) = paths.iter().find(|p| std::path::Path::new(p).exists()) {
-            extra.push_str(&format!(
-                "\n\n\
-                 ═══════════════════════════════════════\n\
-                 WINDOWS SHELL EXECUTION\n\
-                 ═══════════════════════════════════════\n\
-                 This system is running on Windows. Git Bash is available.\n\
-                 When using the functions.shell_command tool, you MUST execute commands through Git Bash:\n\
-                 \"{bash_path}\" -lc \"<your linux command here>\"\n\n\
-                 Examples:\n\
-                 \"{bash_path}\" -lc \"ls -la /path/to/dir\"\n\
-                 \"{bash_path}\" -lc \"grep -r 'pattern' ./src\"\n\
-                 \"{bash_path}\" -lc \"cat file.txt | head -20\"\n\n\
-                 Always use this method instead of running commands directly via cmd.exe or PowerShell.\n\
-                 This allows you to use Linux-style commands (ls, grep, find, cat, sed, awk, etc.) on Windows.",
-                bash_path = bash_path,
-            ));
-        }
+        let bin = shell_bin_path();
+        let ps_path = detect_powershell_path()
+            .unwrap_or("powershell.exe");
+        // Shell environment info + cokacdir command guidance
+        extra.push_str(&format!(
+            "\n\n\
+             ═══════════════════════════════════════\n\
+             WINDOWS EXECUTION ENVIRONMENT\n\
+             ═══════════════════════════════════════\n\
+             PowerShell: {ps_path}\n\
+             Your commands run inside PowerShell. Always use the & (call) operator \
+             before quoted executable paths.\n\
+             WRONG:  \"program.exe\" --arg        ← PowerShell treats this as a string\n\
+             CORRECT: & \"program.exe\" --arg      ← & operator executes the program\n\n\
+             ═══════════════════════════════════════\n\
+             COKACDIR COMMANDS\n\
+             ═══════════════════════════════════════\n\
+             cokacdir is a native Windows binary. Run it DIRECTLY with the & operator.\n\n\
+             CORRECT examples:\n\
+             & \"{bin}\" --currenttime\n\
+             & \"{bin}\" --sendfile C:/path/to/file.txt --chat 12345 --key xxx\n\
+             & \"{bin}\" --cron \"prompt text here\" --at 30m --chat 12345 --key xxx\n\
+             & \"{bin}\" --cron-list --chat 12345 --key xxx\n\n\
+             SCHEDULE TIME (--at) FORMAT:\n\
+             ALWAYS use relative time: 1m, 5m, 30m, 1h, 2h, 1d\n\
+             Do NOT use absolute datetime with spaces (e.g. \"2026-03-02 15:30:00\").\n\
+             To schedule at a specific time, get --currenttime first, calculate the difference, \
+             and use the relative format.",
+            ps_path = ps_path,
+            bin = bin,
+        ));
     }
 
     extra

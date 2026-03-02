@@ -2356,7 +2356,7 @@ async fn handle_clear_command(
                                 if session_data.current_path == *path
                                     && (session_data.provider.is_empty() || session_data.provider == provider)
                                 {
-                                    let cleared = serde_json::json!({"current_path": *path});
+                                    let cleared = serde_json::json!({"current_path": *path, "provider": provider});
                                     if let Ok(json) = serde_json::to_string_pretty(&cleared) {
                                         let _ = fs::write(&file_path, json);
                                     }

@@ -77,6 +77,8 @@ struct BotSettings {
     debug: bool,
     /// chat_id (string) → true if silent mode enabled
     silent: HashMap<String, bool>,
+    /// chat_id (string) → true if direct mode enabled (group chat without ; prefix)
+    direct: HashMap<String, bool>,
 }
 
 impl Default for BotSettings {
@@ -89,6 +91,7 @@ impl Default for BotSettings {
             models: HashMap::new(),
             debug: false,
             silent: HashMap::new(),
+            direct: HashMap::new(),
         }
     }
 }
@@ -856,7 +859,14 @@ fn load_bot_settings(token: &str) -> BotSettings {
             .collect())
         .unwrap_or_default();
 
-    BotSettings { allowed_tools, last_sessions, owner_user_id, as_public_for_group_chat, models, debug, silent }
+    let direct: HashMap<String, bool> = entry.get("direct")
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.iter()
+            .filter_map(|(k, v)| v.as_bool().map(|b| (k.clone(), b)))
+            .collect())
+        .unwrap_or_default();
+
+    BotSettings { allowed_tools, last_sessions, owner_user_id, as_public_for_group_chat, models, debug, silent, direct }
 }
 
 /// Save bot settings to bot_settings.json
@@ -881,6 +891,7 @@ fn save_bot_settings(token: &str, settings: &BotSettings) {
         "models": settings.models,
         "debug": settings.debug,
         "silent": settings.silent,
+        "direct": settings.direct,
     });
     if let Some(owner_id) = settings.owner_user_id {
         entry["owner_user_id"] = serde_json::json!(owner_id);
@@ -979,6 +990,7 @@ pub async fn run_bot(token: &str) {
         teloxide::types::BotCommand::new("model", "Set AI model"),
         teloxide::types::BotCommand::new("debug", "Toggle debug logging"),
         teloxide::types::BotCommand::new("silent", "Toggle silent mode (hide tool calls)"),
+        teloxide::types::BotCommand::new("direct", "Toggle direct mode (group only)"),
     ];
     if let Err(e) = tg!("set_my_commands", bot.set_my_commands(commands).await) {
         println!("  ⚠ Failed to set bot commands: {e}");
@@ -1069,43 +1081,53 @@ async fn handle_message(
         return Ok(());
     };
     let is_group_chat = matches!(msg.chat.kind, teloxide::types::ChatKind::Public(_));
-    let imprinted = {
+    let (require_prefix, imprinted, is_owner) = {
         let mut data = state.lock().await;
-        match data.settings.owner_user_id {
+        let chat_key = chat_id.0.to_string();
+        let direct_setting = data.settings.direct.get(&chat_key).copied().unwrap_or(false);
+        let is_direct = is_group_chat && direct_setting;
+        msg_debug(&format!("[handle_message] chat_id={}, uid={}, is_group_chat={}, direct_setting={}, is_direct={}",
+            chat_id.0, uid, is_group_chat, direct_setting, is_direct));
+        // In direct mode, ; prefix requirement is waived but is_group_chat stays true
+        let require_prefix = is_group_chat && !is_direct;
+        msg_debug(&format!("[handle_message] require_prefix={}", require_prefix));
+        let (imprinted, is_owner) = match data.settings.owner_user_id {
             None => {
                 // Imprint: register first user as owner
+                msg_debug(&format!("[handle_message] imprinting uid={} as owner", uid));
                 data.settings.owner_user_id = Some(uid);
                 save_bot_settings(token, &data.settings);
                 println!("  [{timestamp}] ★ Owner registered: {raw_user_name} (id:{uid})");
-                true
+                (true, true)
             }
             Some(owner_id) => {
                 if uid != owner_id {
                     // Check if this is a public group chat
-                    let chat_key = chat_id.0.to_string();
                     let is_public = is_group_chat
                         && data.settings.as_public_for_group_chat.get(&chat_key).copied().unwrap_or(false);
+                    msg_debug(&format!("[handle_message] non-owner uid={}, owner_id={}, is_public={}", uid, owner_id, is_public));
                     if !is_public {
                         // Unregistered user → reject silently (log only)
+                        msg_debug(&format!("[handle_message] rejected non-owner uid={}", uid));
                         println!("  [{timestamp}] ✗ Rejected: {raw_user_name} (id:{uid})");
                         return Ok(());
                     }
                     // Public group chat: allow non-owner user
                     println!("  [{timestamp}] ○ [{raw_user_name}(id:{uid})] Public group access");
+                    (false, false)
+                } else {
+                    msg_debug(&format!("[handle_message] owner confirmed uid={}", uid));
+                    (false, true)
                 }
-                false
             }
-        }
+        };
+        msg_debug(&format!("[handle_message] result: require_prefix={}, imprinted={}, is_owner={}", require_prefix, imprinted, is_owner));
+        (require_prefix, imprinted, is_owner)
     };
     if imprinted {
         // Owner registration is logged to server console only
         // No response sent to the user
     }
-
-    let is_owner = {
-        let data = state.lock().await;
-        data.settings.owner_user_id == Some(uid)
-    };
 
     let user_name = format!("{}({uid})", raw_user_name);
 
@@ -1116,12 +1138,16 @@ async fn handle_message(
 
     // Handle file/photo uploads
     if msg.document().is_some() || msg.photo().is_some() {
-        // In group chats, only process uploads whose caption starts with ';'
-        if is_group_chat {
+        // In group chats (with prefix required), only process uploads whose caption starts with ';'
+        if require_prefix {
             let caption = msg.caption().unwrap_or("");
+            msg_debug(&format!("[handle_message] upload: require_prefix=true, caption={:?}, starts_with_semi={}", caption, caption.starts_with(';')));
             if !caption.starts_with(';') {
+                msg_debug("[handle_message] upload: rejected (no ; prefix)");
                 return Ok(());
             }
+        } else {
+            msg_debug(&format!("[handle_message] upload: require_prefix=false, caption={:?}", msg.caption()));
         }
         let file_hint = if msg.document().is_some() { "document" } else { "photo" };
         println!("  [{timestamp}] ◀ [{user_name}] Upload: {file_hint}");
@@ -1129,13 +1155,17 @@ async fn handle_message(
         println!("  [{timestamp}] ▶ [{user_name}] Upload complete");
         // If caption contains text after ';', send it to AI as a follow-up message
         if let Some(caption) = msg.caption() {
-            let text_part = if is_group_chat {
-                // Group chat: extract text after ';'
-                caption.find(';').map(|pos| caption[pos + 1..].trim())
+            let text_part = if require_prefix {
+                // Group chat (prefix mode): extract text after ';'
+                let result = caption.find(';').map(|pos| caption[pos + 1..].trim());
+                msg_debug(&format!("[handle_message] upload caption (prefix mode): extracted={:?}", result));
+                result
             } else {
-                // DM: use entire caption as-is
+                // DM or direct mode: use entire caption as-is
                 let trimmed = caption.trim();
-                if trimmed.is_empty() { None } else { Some(trimmed) }
+                let result = if trimmed.is_empty() { None } else { Some(trimmed) };
+                msg_debug(&format!("[handle_message] upload caption (direct): extracted={:?}", result));
+                result
             };
             if let Some(text) = text_part {
                 if !text.is_empty() {
@@ -1193,8 +1223,9 @@ async fn handle_message(
         auto_restore_session(&state, chat_id, &user_name).await;
     }
 
-    // In group chats, ignore plain text (only /, !, ; prefixed messages are processed)
-    if is_group_chat && !text.starts_with('/') && !text.starts_with('!') && !text.starts_with(';') {
+    // In group chats (with prefix required), ignore plain text (only /, !, ; prefixed messages are processed)
+    if require_prefix && !text.starts_with('/') && !text.starts_with('!') && !text.starts_with(';') {
+        msg_debug(&format!("[handle_message] chat_id={}, require_prefix=true, ignoring plain text", chat_id.0));
         return Ok(());
     }
 
@@ -1277,6 +1308,10 @@ async fn handle_message(
         msg_debug("[handle_message] routing → /silent");
         println!("  [{timestamp}] ◀ [{user_name}] /silent");
         handle_silent_command(&bot, chat_id, &state, token).await?;
+    } else if text.starts_with("/direct") {
+        msg_debug("[handle_message] routing → /direct");
+        println!("  [{timestamp}] ◀ [{user_name}] /direct");
+        handle_direct_command(&bot, chat_id, &msg, &state, token, is_owner).await?;
     } else if text.starts_with("/allowed") {
         msg_debug("[handle_message] routing → /allowed");
         println!("  [{timestamp}] ◀ [{user_name}] /allowed {}", text.strip_prefix("/allowed").unwrap_or("").trim());
@@ -1298,14 +1333,15 @@ async fn handle_message(
     } else if text.starts_with(';') {
         let stripped = text.strip_prefix(';').unwrap_or(&text).trim().to_string();
         if stripped.is_empty() {
+            msg_debug("[handle_message] ;prefix with empty body, ignoring");
             return Ok(());
         }
         let preview = &stripped;
-        msg_debug(&format!("[handle_message] routing → text_message (;prefix)"));
+        msg_debug(&format!("[handle_message] routing → text_message (;prefix), stripped={:?}", truncate_str(&stripped, 80)));
         println!("  [{timestamp}] ◀ [{user_name}] {preview}");
         handle_text_message(&bot, chat_id, &stripped, &state).await?;
     } else {
-        msg_debug(&format!("[handle_message] routing → text_message (plain)"));
+        msg_debug(&format!("[handle_message] routing → text_message (plain), require_prefix={}", require_prefix));
         println!("  [{timestamp}] ◀ [{user_name}] {preview}");
         handle_text_message(&bot, chat_id, &text, &state).await?;
     }
@@ -1356,6 +1392,7 @@ AI can read, edit, and run commands in your session.
 <code>;</code><i>caption</i> — Upload file with AI prompt
 <code>/public on</code> — Allow all members to use bot
 <code>/public off</code> — Owner only (default)
+<code>/direct</code> — Toggle direct mode (no ; prefix needed)
 
 <b>Schedule</b>
 Ask in natural language to manage schedules.
@@ -1392,7 +1429,8 @@ async fn handle_start_command(
     msg_debug(&format!("[handle_start_command] chat_id={}, path_str={:?}", chat_id.0, path_str));
 
     // Determine current provider (Claude vs Codex)
-    let provider = {
+    let original_provider_str: &str;
+    let mut provider = {
         let data = state.lock().await;
         let model = get_model(&data.settings, chat_id);
         let use_codex = if model.is_some() {
@@ -1407,10 +1445,11 @@ async fn handle_start_command(
             SessionProvider::Claude
         }
     };
-    let provider_str = match provider {
+    let mut provider_str = match provider {
         SessionProvider::Claude => "claude",
         SessionProvider::Codex => "codex",
     };
+    original_provider_str = provider_str;
 
     let canonical_path = if path_str.is_empty() {
         // Create random workspace directory
@@ -1472,54 +1511,111 @@ async fn handle_start_command(
             .unwrap_or_else(|_| expanded)
     } else {
         // Session name/ID mode: resolve Claude Code session
-        match resolve_session(path_str, provider) {
-            Some(info) => {
+        // Try current provider first, then cross-provider fallback
+        let other_provider = match provider {
+            SessionProvider::Claude => SessionProvider::Codex,
+            SessionProvider::Codex => SessionProvider::Claude,
+        };
+        let other_provider_str = match other_provider {
+            SessionProvider::Claude => "claude",
+            SessionProvider::Codex => "codex",
+        };
+
+        // Helper closure: try resolve_session + ai_sessions for a given provider
+        let try_resolve = |prov: SessionProvider, prov_str: &str| -> Option<String> {
+            msg_debug(&format!("[try_resolve] provider={}, query={:?}", prov_str, path_str));
+            if let Some(info) = resolve_session(path_str, prov) {
                 let path = Path::new(&info.cwd);
-                if path.is_dir() {
+                let is_dir = path.is_dir();
+                msg_debug(&format!("[try_resolve] resolve_session found: cwd={:?}, is_dir={}", info.cwd, is_dir));
+                if is_dir {
                     let canonical = path.canonicalize()
                         .map(crate::utils::format::strip_unc_prefix)
                         .map(|p| p.display().to_string())
                         .unwrap_or_else(|_| info.cwd.clone());
                     convert_and_save_session(&info, &canonical);
-                    canonical
+                    msg_debug(&format!("[try_resolve] resolved via resolve_session: canonical={}", canonical));
+                    return Some(canonical);
                 } else {
+                    msg_debug(&format!("[try_resolve] resolve_session cwd not a dir: {:?}", info.cwd));
+                }
+            } else {
+                msg_debug(&format!("[try_resolve] resolve_session returned None for provider={}", prov_str));
+            }
+            // Try ai_sessions/{id}.json
+            msg_debug(&format!("[try_resolve] trying ai_sessions/{}.json", path_str));
+            let result = ai_screen::ai_sessions_dir().and_then(|dir| {
+                let file = dir.join(format!("{}.json", path_str));
+                let content = fs::read_to_string(&file).ok()?;
+                let sd: SessionData = serde_json::from_str(&content).ok()?;
+                if !sd.provider.is_empty() && sd.provider != prov_str {
+                    msg_debug(&format!("[try_resolve] ai_sessions/{}.json provider mismatch: {} != {}", path_str, sd.provider, prov_str));
+                    return None;
+                }
+                let p = Path::new(&sd.current_path);
+                let is_dir = p.is_dir();
+                msg_debug(&format!("[try_resolve] ai_sessions/{}.json: current_path={:?}, provider={}, is_dir={}", path_str, sd.current_path, sd.provider, is_dir));
+                if is_dir { Some(sd.current_path.clone()) } else { None }
+            });
+            msg_debug(&format!("[try_resolve] ai_sessions result: {}", if result.is_some() { "found" } else { "None" }));
+            result
+        };
+
+        if let Some(cp) = try_resolve(provider, provider_str) {
+            msg_debug(&format!("[handle_start_command] resolved with current provider: path={}", cp));
+            cp
+        } else {
+            // Cross-provider fallback: only if the other provider is available
+            let other_available = match other_provider {
+                SessionProvider::Claude => claude::is_claude_available(),
+                SessionProvider::Codex => codex::is_codex_available(),
+            };
+            msg_debug(&format!("[handle_start_command] cross-provider attempt: other={}, available={}", other_provider_str, other_available));
+            let cross_resolved = if other_available {
+                try_resolve(other_provider, other_provider_str)
+            } else {
+                msg_debug(&format!("[handle_start_command] cross-provider skip: {} not available", other_provider_str));
+                None
+            };
+
+            if let Some(cp) = cross_resolved {
+                // Cross-provider fallback: switch provider and model to other provider's default
+                msg_debug(&format!("[handle_start_command] cross-provider fallback: switching from {} to {}", provider_str, other_provider_str));
+                provider = other_provider;
+                provider_str = other_provider_str;
+                {
+                    let mut data = state.lock().await;
+                    msg_debug(&format!("[handle_start_command] cross-provider: setting model to {:?}", other_provider_str));
+                    data.settings.models.insert(chat_id.0.to_string(), other_provider_str.to_string());
+                    save_bot_settings(token, &data.settings);
+                    if let Some(session) = data.sessions.get_mut(&chat_id) {
+                        msg_debug(&format!("[handle_start_command] cross-provider: clearing old session (len={}, sid={:?}, path={:?})",
+                            session.history.len(), session.session_id, session.current_path));
+                        session.session_id = None;
+                        session.current_path = None;
+                        session.history.clear();
+                    } else {
+                        msg_debug("[handle_start_command] cross-provider: no existing session to clear");
+                    }
+                }
+                cp
+            } else {
+                // Final fallback: try as plain path
+                msg_debug(&format!("[handle_start_command] all session resolves failed, trying as plain path: {:?}", path_str));
+                let path = Path::new(path_str);
+                if path.exists() && path.is_dir() {
+                    let resolved = path.canonicalize()
+                        .map(crate::utils::format::strip_unc_prefix)
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|_| path_str.to_string());
+                    msg_debug(&format!("[handle_start_command] plain path resolved: {}", resolved));
+                    resolved
+                } else {
+                    msg_debug(&format!("[handle_start_command] plain path failed: exists={}, is_dir={}", path.exists(), path.is_dir()));
                     shared_rate_limit_wait(state, chat_id).await;
-                    tg!("send_message", bot.send_message(chat_id, format!("Error: session directory '{}' no longer exists.", info.cwd))
+                    tg!("send_message", bot.send_message(chat_id, format!("Error: no session or directory found for '{}'.", path_str))
                         .await)?;
                     return Ok(());
-                }
-            }
-            None => {
-                // Fallback 1: try ai_sessions/{id}.json (cokacdir internal sessions)
-                let internal = ai_screen::ai_sessions_dir().and_then(|dir| {
-                    let file = dir.join(format!("{}.json", path_str));
-                    let content = fs::read_to_string(&file).ok()?;
-                    let sd: SessionData = serde_json::from_str(&content).ok()?;
-                    // Provider filter
-                    if !sd.provider.is_empty() && sd.provider != provider_str {
-                        msg_debug(&format!("[handle_start_command] ai_sessions/{}.json provider mismatch: {} != {}", path_str, sd.provider, provider_str));
-                        return None;
-                    }
-                    let p = Path::new(&sd.current_path);
-                    if p.is_dir() { Some(sd.current_path.clone()) } else { None }
-                });
-                if let Some(cp) = internal {
-                    msg_debug(&format!("[handle_start_command] resolved from ai_sessions: id={}, path={}", path_str, cp));
-                    cp
-                } else {
-                    // Fallback 2: try as plain path
-                    let path = Path::new(path_str);
-                    if path.exists() && path.is_dir() {
-                        path.canonicalize()
-                            .map(crate::utils::format::strip_unc_prefix)
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|_| path_str.to_string())
-                    } else {
-                        shared_rate_limit_wait(state, chat_id).await;
-                        tg!("send_message", bot.send_message(chat_id, format!("Error: no session or directory found for '{}'.", path_str))
-                            .await)?;
-                        return Ok(());
-                    }
                 }
             }
         }
@@ -1545,6 +1641,12 @@ async fn handle_start_command(
     };
 
     let mut response_lines = Vec::new();
+
+    // Notify user if provider was auto-switched via cross-provider fallback
+    if provider_str != original_provider_str {
+        msg_debug(&format!("[handle_start_command] provider auto-switched: {} → {}", original_provider_str, provider_str));
+        response_lines.push(format!("Model switched to **{}**.", provider_str));
+    }
 
     {
         let mut data = state.lock().await;
@@ -3193,6 +3295,46 @@ async fn handle_debug_command(
     Ok(())
 }
 
+/// Handle /direct command - toggle direct mode per chat (no ; prefix in group chats)
+async fn handle_direct_command(
+    bot: &Bot,
+    chat_id: ChatId,
+    msg: &teloxide::types::Message,
+    state: &SharedState,
+    token: &str,
+    is_owner: bool,
+) -> ResponseResult<()> {
+    msg_debug(&format!("[handle_direct] chat_id={}, is_owner={}", chat_id.0, is_owner));
+    let is_actually_group = matches!(msg.chat.kind, teloxide::types::ChatKind::Public(_));
+    msg_debug(&format!("[handle_direct] is_actually_group={}", is_actually_group));
+    if !is_actually_group {
+        msg_debug("[handle_direct] rejected: not a group chat");
+        shared_rate_limit_wait(state, chat_id).await;
+        tg!("send_message", bot.send_message(chat_id, "This command is only available in group chats.").await)?;
+        return Ok(());
+    }
+    if !is_owner {
+        msg_debug("[handle_direct] rejected: not owner");
+        shared_rate_limit_wait(state, chat_id).await;
+        tg!("send_message", bot.send_message(chat_id, "Only the bot owner can change direct mode.").await)?;
+        return Ok(());
+    }
+    let next = {
+        let mut data = state.lock().await;
+        let key = chat_id.0.to_string();
+        let prev = data.settings.direct.get(&key).copied().unwrap_or(false);
+        let next = !prev;
+        msg_debug(&format!("[handle_direct] chat_id={}, {} → {}", chat_id.0, prev, next));
+        data.settings.direct.insert(key, next);
+        save_bot_settings(token, &data.settings);
+        next
+    };
+    let status = if next { "Direct mode: ON (no ; prefix needed)" } else { "Direct mode: OFF (; prefix required)" };
+    shared_rate_limit_wait(state, chat_id).await;
+    tg!("send_message", bot.send_message(chat_id, status).await)?;
+    Ok(())
+}
+
 /// Handle /silent command - toggle silent mode per chat (hide tool calls)
 async fn handle_silent_command(
     bot: &Bot,
@@ -3750,12 +3892,20 @@ async fn handle_text_message(
                                     let summary = format_tool_input(&name, &input);
                                     let ts = chrono::Local::now().format("%H:%M:%S");
                                     println!("  [{ts}]   ⚙ {name}: {summary}");
+                                    msg_debug(&format!("[polling] ToolUse: name={}, pending_cokacdir={}, silent_mode={}, response_len={}, ends_with_nl={}",
+                                        name, pending_cokacdir, silent_mode, full_response.len(), full_response.ends_with('\n')));
                                     if !pending_cokacdir && !silent_mode {
                                         if name == "Bash" {
                                             full_response.push_str(&format!("\n\n```\n{}\n```\n", format_bash_command(&input)));
                                         } else {
                                             full_response.push_str(&format!("\n\n⚙️ {}\n", summary));
                                         }
+                                    } else if !pending_cokacdir && silent_mode && !full_response.is_empty() && !full_response.ends_with('\n') {
+                                        msg_debug(&format!("[polling] silent mode: inserting \\n\\n after tool_use={}", name));
+                                        full_response.push_str("\n\n");
+                                    } else if silent_mode {
+                                        msg_debug(&format!("[polling] silent mode: skipped \\n\\n (pending_cokacdir={}, empty={}, ends_nl={})",
+                                            pending_cokacdir, full_response.is_empty(), full_response.ends_with('\n')));
                                     }
                                 }
                                 StreamMessage::ToolResult { content, is_error } => {
@@ -5319,12 +5469,20 @@ async fn execute_schedule(
                                 let summary = format_tool_input(&name, &input);
                                 let ts = chrono::Local::now().format("%H:%M:%S");
                                 println!("  [{ts}]   ⚙ [Schedule] {name}: {summary}");
+                                sched_debug(&format!("[schedule_polling] ToolUse: name={}, pending_cokacdir={}, silent_mode={}, response_len={}, ends_with_nl={}",
+                                    name, pending_cokacdir, silent_mode, full_response.len(), full_response.ends_with('\n')));
                                 if !pending_cokacdir && !silent_mode {
                                     if name == "Bash" {
                                         full_response.push_str(&format!("\n\n```\n{}\n```\n", format_bash_command(&input)));
                                     } else {
                                         full_response.push_str(&format!("\n\n⚙️ {}\n", summary));
                                     }
+                                } else if !pending_cokacdir && silent_mode && !full_response.is_empty() && !full_response.ends_with('\n') {
+                                    sched_debug(&format!("[schedule_polling] silent mode: inserting \\n\\n after tool_use={}", name));
+                                    full_response.push_str("\n\n");
+                                } else if silent_mode {
+                                    sched_debug(&format!("[schedule_polling] silent mode: skipped \\n\\n (pending_cokacdir={}, empty={}, ends_nl={})",
+                                        pending_cokacdir, full_response.is_empty(), full_response.ends_with('\n')));
                                 }
                             }
                             StreamMessage::ToolResult { content, is_error } => {

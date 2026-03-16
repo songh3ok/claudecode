@@ -1409,7 +1409,17 @@ fn save_bot_settings(token: &str, settings: &BotSettings) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    // Load existing JSON or start fresh
+    // Use file lock to prevent race condition when multiple bots save simultaneously
+    let lock_path = path.with_extension("json.lock");
+    let lock_file = match fs::OpenOptions::new().create(true).write(true).open(&lock_path) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    use fs2::FileExt;
+    if lock_file.lock_exclusive().is_err() {
+        return;
+    }
+    // Read-modify-write under exclusive lock
     let mut json: serde_json::Value = if let Ok(content) = fs::read_to_string(&path) {
         serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
     } else {
@@ -1439,6 +1449,7 @@ fn save_bot_settings(token: &str, settings: &BotSettings) {
             let _ = fs::rename(&tmp_path, &path);
         }
     }
+    // lock released when lock_file is dropped
 }
 
 /// Resolve a bot token from its hash by searching bot_settings.json

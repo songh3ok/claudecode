@@ -1918,12 +1918,39 @@ async fn handle_message(
 
     // Handle file/photo uploads
     if msg.document().is_some() || msg.photo().is_some() {
-        // In group chats (with prefix required), only process uploads whose caption starts with ';'
+        // In group chats (with prefix required), only process uploads whose caption starts with ';' or '@botname'
         if require_prefix {
             let caption = msg.caption().unwrap_or("");
-            msg_debug(&format!("[handle_message] upload: require_prefix=true, caption={:?}, starts_with_semi={}", caption, caption.starts_with(';')));
-            if !caption.starts_with(';') {
-                msg_debug("[handle_message] upload: rejected (no ; prefix)");
+            msg_debug(&format!("[handle_message] upload: require_prefix=true, caption={:?}", caption));
+            if !bot_username.is_empty() && caption.starts_with('@') {
+                // Caption starts with @mention — only accept if targeting this bot
+                let caption_lower = caption.to_lowercase();
+                let prefix = format!("@{}", bot_username.to_lowercase());
+                if !caption_lower.starts_with(&prefix)
+                    || caption_lower.len() > prefix.len()
+                        && !caption_lower[prefix.len()..].starts_with(|c: char| c.is_whitespace())
+                {
+                    msg_debug("[handle_message] upload: rejected (@mention for another bot)");
+                    return Ok(());
+                }
+                msg_debug(&format!("[handle_message] upload: accepted (@{} mention)", bot_username));
+            } else if caption.starts_with(';') {
+                // Check for ";@botname" — targeting a specific bot
+                let after_semi = caption[1..].trim_start();
+                if !bot_username.is_empty() && after_semi.starts_with('@') {
+                    let at_body = &after_semi[1..];
+                    let mention_end = at_body.find(|c: char| c.is_whitespace()).unwrap_or(at_body.len());
+                    let mentioned = &at_body[..mention_end];
+                    if mentioned.to_lowercase() != bot_username.to_lowercase() {
+                        msg_debug(&format!("[handle_message] upload: rejected (;@{} for another bot)", mentioned));
+                        return Ok(());
+                    }
+                    msg_debug(&format!("[handle_message] upload: accepted (;@{} mention)", bot_username));
+                } else {
+                    msg_debug("[handle_message] upload: accepted (; prefix, all bots)");
+                }
+            } else {
+                msg_debug("[handle_message] upload: rejected (no ; or @ prefix)");
                 return Ok(());
             }
         } else {
@@ -1933,11 +1960,34 @@ async fn handle_message(
         println!("  [{timestamp}] ◀ [{user_name}] Upload: {file_hint}");
         handle_file_upload(&bot, chat_id, &msg, &state, &user_name).await?;
         println!("  [{timestamp}] ▶ [{user_name}] Upload complete");
-        // If caption contains text after ';', send it to AI as a follow-up message
+        // If caption contains text, send it to AI as a follow-up message
         if let Some(caption) = msg.caption() {
             let text_part = if require_prefix {
-                // Group chat (prefix mode): extract text after ';'
-                let result = caption.find(';').map(|pos| caption[pos + 1..].trim());
+                // Group chat (prefix mode): extract message text from caption
+                // Formats: ";text", "@botname text", "@botname ;text", ";@botname text"
+                let extracted = if !bot_username.is_empty() && caption.starts_with('@') {
+                    // "@botname text" → extract text after @botname
+                    let prefix = format!("@{} ", bot_username);
+                    if caption.to_lowercase().starts_with(&prefix.to_lowercase()) {
+                        let body = caption[prefix.len()..].trim_start();
+                        body.strip_prefix(';').map(|s| s.trim_start()).unwrap_or(body)
+                    } else {
+                        ""
+                    }
+                } else if caption.starts_with(';') {
+                    let after_semi = caption[1..].trim_start();
+                    if !bot_username.is_empty() && after_semi.starts_with('@') {
+                        // ";@botname text" → extract text after @botname
+                        let at_body = &after_semi[1..];
+                        let mention_end = at_body.find(|c: char| c.is_whitespace()).unwrap_or(at_body.len());
+                        after_semi[1 + mention_end..].trim_start()
+                    } else {
+                        after_semi
+                    }
+                } else {
+                    ""
+                };
+                let result = if extracted.is_empty() { None } else { Some(extracted) };
                 msg_debug(&format!("[handle_message] upload caption (prefix mode): extracted={:?}", result));
                 result
             } else {

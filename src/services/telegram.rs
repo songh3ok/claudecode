@@ -260,6 +260,8 @@ struct BotSettings {
     username: String,
     /// Bot's display name (first_name from Telegram API, stored at startup via get_me)
     display_name: String,
+    /// Default model to use when no per-chat model is configured
+    default_model: Option<String>,
 }
 
 impl Default for BotSettings {
@@ -276,6 +278,7 @@ impl Default for BotSettings {
             instructions: HashMap::new(),
             username: String::new(),
             display_name: String::new(),
+            default_model: None,
         }
     }
 }
@@ -293,7 +296,8 @@ fn get_allowed_tools(settings: &BotSettings, chat_id: ChatId) -> Vec<String> {
 /// Migrates legacy bare names (e.g. "sonnet") to "claude:" prefixed format.
 fn get_model(settings: &BotSettings, chat_id: ChatId) -> Option<String> {
     let key = chat_id.0.to_string();
-    settings.models.get(&key).map(|m| {
+    let m = settings.models.get(&key).or(settings.default_model.as_ref());
+    m.map(|m| {
         match m.as_str() {
             "sonnet" | "opus" | "haiku" |
             "sonnet[1m]" | "opus[1m]" | "haiku[1m]" => format!("claude:{}", m),
@@ -1449,12 +1453,20 @@ fn load_bot_settings(token: &str) -> BotSettings {
         .unwrap_or("")
         .to_string();
 
+    // Load default_model (no migration: new bots start without a default model)
+    let default_model = entry.get("default_model")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let display_name = entry.get("display_name")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
 
-    BotSettings { allowed_tools, last_sessions, owner_user_id, as_public_for_group_chat, models, debug, silent, direct, instructions, username, display_name }
+    BotSettings {
+        allowed_tools, last_sessions, owner_user_id, as_public_for_group_chat, models,
+        debug, silent, direct, instructions, username, display_name, default_model
+    }
 }
 
 /// Save bot settings to bot_settings.json
@@ -1493,6 +1505,7 @@ fn save_bot_settings(token: &str, settings: &BotSettings) {
         "instructions": settings.instructions,
         "username": settings.username,
         "display_name": settings.display_name,
+        "default_model": settings.default_model,
     });
     if let Some(owner_id) = settings.owner_user_id {
         entry["owner_user_id"] = serde_json::json!(owner_id);
@@ -4714,7 +4727,11 @@ async fn handle_model_command(
     state: &SharedState,
     token: &str,
 ) -> ResponseResult<()> {
-    let arg = text.strip_prefix("/model").unwrap_or("").trim();
+    let arg = if text.starts_with("/models") {
+        text.strip_prefix("/models").unwrap_or("").trim()
+    } else {
+        text.strip_prefix("/model").unwrap_or("").trim()
+    };
     msg_debug(&format!("[handle_model_command] chat_id={}, arg={:?}", chat_id.0, arg));
 
     if arg.is_empty() {
@@ -4785,6 +4802,11 @@ async fn handle_model_command(
                     }
                 }
                 data.settings.models.insert(chat_id.0.to_string(), model_id.clone());
+                // Private chat (chat_id > 0): update default_model so group chats
+                // use this bot's chosen model.
+                if chat_id.0 > 0 {
+                    data.settings.default_model = Some(model_id.clone());
+                }
                 save_bot_settings(token, &data.settings);
             }
             shared_rate_limit_wait(state, chat_id).await;
